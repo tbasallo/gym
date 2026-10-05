@@ -1,0 +1,101 @@
+@page "/schedules"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AppPage
+@inject ScheduleService ScheduleSvc
+@inject GroupService Groups
+@inject NavigationManager Nav
+
+<PageTitle>Schedules · Gym</PageTitle>
+
+<div class="stack">
+    <h1>Schedules</h1>
+    <p class="muted">
+        A schedule is a rotation of days done in order (Day 1, Day 2, Day 3 "Leg Day"...), not tied to dates.
+        Finishing a session moves the schedule on to the next day. Group schedules are shared by everyone in the group;
+        personal schedules are for workouts on your own.
+    </p>
+
+    @if (Error is not null)
+    {
+        <div class="alert-x">@Error</div>
+    }
+
+    <div class="grid-cards">
+        @foreach (var s in schedules)
+        {
+            var next = ScheduleService.NextDay(s);
+            <a class="card-x text-decoration-none" style="color: inherit" href="schedules/@s.Id">
+                <div class="small-caps">@(s.Group?.Name ?? "Personal")@(s.IsArchived ? " · archived" : "")</div>
+                <h2 class="mb-1">@s.Name</h2>
+                <div class="muted small">@s.Days.Count day@(s.Days.Count == 1 ? "" : "s")@(next is null ? "" : $" · up next: #{next.Order} {next.Name}")</div>
+            </a>
+        }
+        @if (schedules.Count == 0)
+        {
+            <div class="empty">No schedules yet.</div>
+        }
+    </div>
+
+    <div class="card-x stack-sm">
+        <h3>New schedule</h3>
+        <div class="row g-2">
+            <div class="col-sm-5">
+                <label class="form-label" for="name">Name</label>
+                <input id="name" class="form-control" @bind="newName" @bind:event="oninput" placeholder="e.g. Spring split" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label" for="owner">For</label>
+                <select id="owner" class="form-select" @bind="ownerGroupId">
+                    @foreach (var g in groups)
+                    {
+                        <option value="@g.Id">@g.Name (shared)</option>
+                    }
+                    <option value="0">Just me (personal)</option>
+                </select>
+            </div>
+            <div class="col-sm-3 d-flex align-items-end">
+                <button class="btn btn-accent w-100" disabled="@(Busy || string.IsNullOrWhiteSpace(newName))" @onclick="() => Run(Create, reload: false)">Create</button>
+            </div>
+        </div>
+        <div class="muted small">
+            Or <button class="btn btn-link btn-sm p-0 align-baseline" disabled="@Busy" @onclick="() => Run(Starter, reload: false)">start from the 4-day starter rotation</button>
+            (Chest &amp; Triceps, Back &amp; Biceps, Leg Day, Shoulders &amp; Core) and edit it.
+        </div>
+    </div>
+
+    <label class="form-check">
+        <input class="form-check-input" type="checkbox" @bind="showArchived" @bind:after="LoadAsync" />
+        <span class="form-check-label muted">Show archived</span>
+    </label>
+</div>
+
+@code {
+    private List<Schedule> schedules = [];
+    private List<WorkoutGroup> groups = [];
+    private string newName = "";
+    private int ownerGroupId;
+    private bool showArchived;
+
+    protected override async Task LoadAsync()
+    {
+        schedules = await ScheduleSvc.GetSchedulesAsync(UserId, showArchived);
+        groups = await Groups.GetGroupsAsync(UserId);
+        if (ownerGroupId == 0 && groups.Count > 0 && newName.Length == 0)
+        {
+            ownerGroupId = groups[0].Id;
+        }
+    }
+
+    private async Task Create()
+    {
+        var s = await ScheduleSvc.CreateAsync(UserId, newName, ownerGroupId == 0 ? null : ownerGroupId);
+        Nav.NavigateTo($"schedules/{s.Id}");
+    }
+
+    private async Task Starter()
+    {
+        var s = await ScheduleSvc.CreateStarterAsync(UserId, ownerGroupId == 0 ? null : ownerGroupId);
+        Nav.NavigateTo($"schedules/{s.Id}");
+    }
+}

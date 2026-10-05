@@ -1,0 +1,154 @@
+@page "/settings"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AppPage
+@inject StatsService Stats
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IJSRuntime JS
+
+<PageTitle>Settings · Gym</PageTitle>
+
+<div class="stack">
+    <h1>Settings</h1>
+
+    @if (Error is not null)
+    {
+        <div class="alert-x">@Error</div>
+    }
+    @if (Notice is not null)
+    {
+        <div class="alert-x ok">@Notice</div>
+    }
+
+    <section class="card-x">
+        <h2>Profile</h2>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label" for="dn">Display name</label>
+                <input id="dn" class="form-control" maxlength="50" @bind="displayName" />
+            </div>
+            <div class="col-md-2 col-6">
+                <label class="form-label" for="unit">Weight unit</label>
+                <select id="unit" class="form-select" @bind="unit">
+                    <option value="lb">lb</option>
+                    <option value="kg">kg</option>
+                </select>
+            </div>
+            <div class="col-md-2 col-6">
+                <label class="form-label" for="rest">Default rest (sec)</label>
+                <input id="rest" type="number" min="0" step="15" class="form-control" @bind="restSeconds" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="tz">Time zone</label>
+                <div class="row-gap">
+                    <input id="tz" class="form-control" style="flex: 1" @bind="timeZone" placeholder="America/New_York" />
+                    <button class="btn btn-soft btn-sm" @onclick="DetectZone">Use this device</button>
+                </div>
+            </div>
+        </div>
+        <div class="mt-3 row-gap">
+            <button class="btn btn-accent" disabled="@Busy" @onclick="() => Run(SaveProfile)">Save profile</button>
+            <a class="btn btn-link" href="Account/Manage">Email &amp; password</a>
+        </div>
+    </section>
+
+    <section class="card-x">
+        <h2>Progression rules</h2>
+        <p class="muted">
+            After every session the app looks at your history for each exercise and runs these rules in order.
+            The first rule that applies decides what it suggests for next time.
+        </p>
+        <ol class="small stack-sm">
+            <li><strong>First time</strong>: no history yet, so find a weight you can move with good form.</li>
+            <li><strong>Layoff</strong>: if it's been at least <em>layoff days</em> since you last did it, ease back in <em>deload %</em> lighter.</li>
+            <li><strong>Move up</strong>: hit every target set and rep for <em>sessions to move up</em> sessions in a row at the same weight → add the increment for that body region.</li>
+            <li><strong>Deload</strong>: missed targets <em>misses before deload</em> sessions in a row at the same weight → drop <em>deload %</em>.</li>
+            <li><strong>Hold</strong>: otherwise stay at the same weight.</li>
+        </ol>
+        @if (rules is not null)
+        {
+            <div class="row g-3">
+                <div class="col-md-3 col-6">
+                    <label class="form-label" for="r1">Sessions to move up</label>
+                    <input id="r1" type="number" min="1" class="form-control" @bind="rules.SessionsToProgress" />
+                </div>
+                <div class="col-md-3 col-6">
+                    <label class="form-label" for="r2">Misses before deload</label>
+                    <input id="r2" type="number" min="0" class="form-control" @bind="rules.MissesBeforeDeload" />
+                </div>
+                <div class="col-md-3 col-6">
+                    <label class="form-label" for="r3">Deload %</label>
+                    <input id="r3" type="number" min="0" max="50" class="form-control" @bind="rules.DeloadPercent" />
+                </div>
+                <div class="col-md-3 col-6">
+                    <label class="form-label" for="r4">Layoff days</label>
+                    <input id="r4" type="number" min="0" class="form-control" @bind="rules.LayoffDays" />
+                </div>
+                <div class="col-md-3 col-6">
+                    <label class="form-label" for="r5">Upper body +@unit</label>
+                    <input id="r5" type="number" step="any" class="form-control" @bind="rules.UpperIncrement" />
+                </div>
+                <div class="col-md-3 col-6">
+                    <label class="form-label" for="r6">Lower body +@unit</label>
+                    <input id="r6" type="number" step="any" class="form-control" @bind="rules.LowerIncrement" />
+                </div>
+                <div class="col-md-3 col-6">
+                    <label class="form-label" for="r7">Core +@unit</label>
+                    <input id="r7" type="number" step="any" class="form-control" @bind="rules.CoreIncrement" />
+                </div>
+                <div class="col-md-3 col-6">
+                    <label class="form-label" for="r8">Round to (@unit)</label>
+                    <input id="r8" type="number" step="any" class="form-control" @bind="rules.RoundTo" />
+                </div>
+            </div>
+            <div class="mt-3">
+                <button class="btn btn-accent" disabled="@Busy" @onclick="() => Run(SaveRules)">Save rules</button>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private string displayName = "";
+    private string unit = "lb";
+    private int restSeconds = 90;
+    private string? timeZone;
+    private ProgressionSettings? rules;
+
+    protected override async Task LoadAsync()
+    {
+        displayName = CurrentUser.DisplayName;
+        unit = CurrentUser.WeightUnit;
+        restSeconds = CurrentUser.DefaultRestSeconds;
+        timeZone = CurrentUser.TimeZoneId;
+        rules = await Stats.GetSettingsAsync(UserId);
+    }
+
+    private async Task DetectZone() => timeZone = await JS.InvokeAsync<string>("gym.timeZone");
+
+    private async Task SaveProfile()
+    {
+        if (!string.IsNullOrWhiteSpace(timeZone) && !TimeZoneInfo.TryFindSystemTimeZoneById(timeZone.Trim(), out _))
+        {
+            throw new InvalidOperationException("Unknown time zone. Use a name like America/New_York.");
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.Users.Where(u => u.Id == UserId).ExecuteUpdateAsync(u => u
+            .SetProperty(x => x.DisplayName, displayName.Trim())
+            .SetProperty(x => x.WeightUnit, unit == "kg" ? "kg" : "lb")
+            .SetProperty(x => x.DefaultRestSeconds, Math.Clamp(restSeconds, 0, 900))
+            .SetProperty(x => x.TimeZoneId, string.IsNullOrWhiteSpace(timeZone) ? null : timeZone.Trim()));
+        await RefreshUserAsync();
+        Notice = "Profile saved.";
+    }
+
+    private async Task SaveRules()
+    {
+        rules!.SessionsToProgress = Math.Max(1, rules.SessionsToProgress);
+        rules.DeloadPercent = Math.Clamp(rules.DeloadPercent, 0, 50);
+        rules.RoundTo = rules.RoundTo <= 0 ? 1 : rules.RoundTo;
+        await Stats.SaveSettingsAsync(rules);
+        Notice = "Rules saved. Suggestions update right away.";
+    }
+}

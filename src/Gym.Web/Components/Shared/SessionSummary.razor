@@ -1,0 +1,88 @@
+@* Read-only recap of a finished (or discarded) session. *@
+
+@{
+    var people = Session.Participants.Select(p => p.User).OrderBy(u => u.Name).ThenBy(u => u.Id).ToList();
+}
+
+<div class="stack">
+    <div class="row-between">
+        <div>
+            <div class="small-caps">@(Session.Status == SessionStatus.Completed ? "Completed" : "Discarded")</div>
+            <h1 class="mb-0">@Session.Title</h1>
+            <div class="muted">
+                @Zone.ToLocal(Session.StartedUtc).ToString("dddd MMM d, h:mm tt")
+                @if (Session.EndedUtc is { } end)
+                {
+                    <span> · @Duration(end - Session.StartedUtc)</span>
+                }
+            </div>
+        </div>
+        <a class="btn btn-soft" href="">Back to today</a>
+    </div>
+
+    <div class="tiles">
+        @foreach (var person in people)
+        {
+            var sets = Session.Sets.Where(s => s.UserId == person.Id && !s.IsInProgress).ToList();
+            <div class="tile">
+                <div class="label">@person.Name</div>
+                <div class="value">@sets.Count <span class="muted" style="font-size: .9rem">sets</span></div>
+                <div class="sub num">@sets.Sum(s => s.Reps * s.Weight).ToString("#,0") @person.WeightUnit volume</div>
+            </div>
+        }
+    </div>
+
+    @foreach (var ex in Session.Exercises)
+    {
+        <div class="card-x">
+            <div class="row-between mb-2">
+                <h3 class="mb-0"><a href="exercises/@ex.ExerciseId">@ex.Exercise.Name</a></h3>
+                <span class="muted small">Target @ex.TargetSets × @ex.TargetReps</span>
+            </div>
+            <div class="people">
+                @for (var i = 0; i < people.Count; i++)
+                {
+                    var person = people[i];
+                    var sets = Session.Sets.Where(s => s.UserId == person.Id && s.SessionExerciseId == ex.Id && !s.IsInProgress)
+                        .OrderBy(s => s.SetNumber).ToList();
+                    var started = sets.Select(s => s.StartedUtc ?? s.CompletedUtc).Min();
+                    var ended = sets.Max(s => s.CompletedUtc);
+                    <div class="person p@(i % 4)">
+                        <div class="person-name"><span class="dot"></span>@person.Name</div>
+                        @if (sets.Count == 0)
+                        {
+                            <div class="muted small">Skipped</div>
+                        }
+                        else
+                        {
+                            <ul class="sets">
+                                @foreach (var set in sets)
+                                {
+                                    <li class="@(set.Reps >= set.TargetReps ? "hit" : "miss")" style="cursor: default">
+                                        <span class="idx">@set.SetNumber</span>
+                                        <span class="what">@set.Reps × @set.Weight.ToString("0.##")</span>
+                                        <span class="dur">@(set.Duration is { } d ? Duration(d) : "")</span>
+                                    </li>
+                                }
+                            </ul>
+                            @if (started is not null && ended is not null)
+                            {
+                                <div class="muted small">
+                                    @Zone.ToLocal(started.Value).ToString("h:mm") – @Zone.ToLocal(ended.Value).ToString("h:mm tt")
+                                </div>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public WorkoutSession Session { get; set; } = null!;
+    [Parameter, EditorRequired] public UserContext Zone { get; set; } = null!;
+
+    private static string Duration(TimeSpan span) =>
+        span.TotalHours >= 1 ? $"{(int)span.TotalHours}h {span.Minutes}m" : span.TotalMinutes >= 1 ? $"{(int)span.TotalMinutes}m {span.Seconds}s" : $"{span.Seconds}s";
+}

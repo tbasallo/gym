@@ -1,0 +1,56 @@
+@page "/exercises"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AppPage
+@inject ExerciseService ExerciseLibrary
+
+<PageTitle>Exercises · Gym</PageTitle>
+
+<div class="stack">
+    <div class="row-between">
+        <h1 class="mb-0">Exercises</h1>
+        <a class="btn btn-accent" href="exercises/new">＋ New exercise</a>
+    </div>
+
+    <input class="form-control" placeholder="Search by name, muscle or category" @bind="term" @bind:event="oninput" />
+
+    @foreach (var group in Filtered.GroupBy(e => e.Category ?? "Other").OrderBy(g => g.Key))
+    {
+        <section>
+            <div class="small-caps mb-2">@group.Key</div>
+            <div class="grid-cards">
+                @foreach (var e in group)
+                {
+                    <a class="card-x text-decoration-none" style="color: inherit; padding: 12px 14px" href="exercises/@e.Id">
+                        <div class="row-between">
+                            <strong>@e.Name</strong>
+                            @if (e.Videos.Count > 0)
+                            {
+                                <span class="pill pill-accent" title="Saved videos">▶ @e.Videos.Count</span>
+                            }
+                        </div>
+                        <div class="muted small">@e.Muscles</div>
+                    </a>
+                }
+            </div>
+        </section>
+    }
+
+    @if (!Filtered.Any())
+    {
+        <div class="empty">No exercises match. <a href="exercises/new">Create one</a></div>
+    }
+</div>
+
+@code {
+    private List<Exercise> all = [];
+    private string term = "";
+
+    private IEnumerable<Exercise> Filtered => string.IsNullOrWhiteSpace(term)
+        ? all
+        : all.Where(e => Has(e.Name) || Has(e.Muscles) || Has(e.Category) || Has(e.Equipment));
+
+    private bool Has(string? v) => v?.Contains(term.Trim(), StringComparison.OrdinalIgnoreCase) == true;
+
+    protected override async Task LoadAsync() => all = await ExerciseLibrary.SearchAsync();
+}

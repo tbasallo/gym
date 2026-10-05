@@ -1,0 +1,111 @@
+@page "/group"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AppPage
+@inject GroupService Groups
+
+<PageTitle>Group · Gym</PageTitle>
+
+<div class="stack">
+    <h1>Group</h1>
+    <p class="muted">
+        People in a group share schedules and work out in the same session. Any device signed in to the group
+        can log sets for everyone in that session.
+    </p>
+
+    @if (Error is not null)
+    {
+        <div class="alert-x">@Error</div>
+    }
+    @if (Notice is not null)
+    {
+        <div class="alert-x ok">@Notice</div>
+    }
+
+    @foreach (var g in groups)
+    {
+        <section class="card-x stack-sm">
+            <div class="row-between">
+                @if (renamingId == g.Id)
+                {
+                    <div class="row-gap">
+                        <input class="form-control" @bind="nameDraft" />
+                        <button class="btn btn-accent btn-sm" @onclick="() => Run(async () => { await Groups.RenameAsync(g.Id, UserId, nameDraft); renamingId = null; })">Save</button>
+                        <button class="btn btn-soft btn-sm" @onclick="() => renamingId = null">Cancel</button>
+                    </div>
+                }
+                else
+                {
+                    <h2 class="mb-0">@g.Name <button class="btn btn-link btn-sm" @onclick="() => { renamingId = g.Id; nameDraft = g.Name; }">Rename</button></h2>
+                }
+            </div>
+            <ul class="list-x">
+                @foreach (var m in g.Members.OrderBy(m => m.User.Name))
+                {
+                    <li class="row-between">
+                        <div>
+                            <div class="fw-semibold">@m.User.Name @(m.UserId == UserId ? "(you)" : "")</div>
+                            <div class="muted small">@m.User.Email</div>
+                        </div>
+                        @if (m.UserId != UserId)
+                        {
+                            <button class="btn btn-sm btn-link text-danger" @onclick="() => Run(() => Groups.RemoveMemberAsync(g.Id, UserId, m.UserId))">Remove</button>
+                        }
+                    </li>
+                }
+            </ul>
+            <div>
+                <label class="form-label">Add someone (they must register first)</label>
+                <div class="row-gap">
+                    <input class="form-control" style="max-width: 320px" type="email" placeholder="email@example.com" @bind="Invite(g.Id).Email" />
+                    <button class="btn btn-soft" disabled="@Busy" @onclick="() => Run(() => Add(g.Id))">Add</button>
+                </div>
+            </div>
+        </section>
+    }
+
+    <section class="card-x">
+        <h3>@(groups.Count == 0 ? "Create your group" : "Create another group")</h3>
+        <div class="row-gap">
+            <input class="form-control" style="max-width: 320px" placeholder="e.g. Tony & Maria" @bind="newName" @bind:event="oninput" />
+            <button class="btn btn-accent" disabled="@(Busy || string.IsNullOrWhiteSpace(newName))" @onclick="() => Run(async () => { await Groups.CreateAsync(UserId, newName); newName = string.Empty; })">Create</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    private sealed class InviteDraft
+    {
+        public string Email { get; set; } = "";
+    }
+
+    private List<WorkoutGroup> groups = [];
+    private readonly Dictionary<int, InviteDraft> invites = [];
+    private int? renamingId;
+    private string nameDraft = "";
+    private string newName = "";
+
+    protected override async Task LoadAsync() => groups = await Groups.GetGroupsAsync(UserId);
+
+    private InviteDraft Invite(int groupId)
+    {
+        if (!invites.TryGetValue(groupId, out var draft))
+        {
+            invites[groupId] = draft = new InviteDraft();
+        }
+
+        return draft;
+    }
+
+    private async Task Add(int groupId)
+    {
+        var draft = Invite(groupId);
+        if (await Groups.AddMemberAsync(groupId, UserId, draft.Email) is { } error)
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        Notice = $"Added {draft.Email}.";
+        draft.Email = "";
+    }
+}

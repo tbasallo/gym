@@ -1,0 +1,95 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  PROJECT: src/Gym.Web/Gym.Web.csproj
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test --no-build -c Release
+
+      - name: Publish
+        run: dotnet publish ${{ env.PROJECT }} -c Release -o publish
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: app
+          path: publish
+          retention-days: 7
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write   # OpenID Connect login to Azure, no stored credentials
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: app
+          path: publish
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Idempotent settings Blazor Server needs: WebSockets, sticky sessions, .NET 10 runtime.
+      - name: Configure App Service
+        if: vars.AZURE_RESOURCE_GROUP != ''
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az webapp config set \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "${{ vars.AZURE_WEBAPP_NAME }}" \
+              --linux-fx-version "DOTNETCORE|10.0" \
+              --web-sockets-enabled true \
+              --always-on true \
+              --http20-enabled true \
+              --min-tls-version 1.2 \
+              --ftps-state Disabled \
+              --startup-file "dotnet Gym.Web.dll" \
+              --generic-configurations '{"healthCheckPath": "/healthz"}' \
+              --output none
+            az webapp update \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "${{ vars.AZURE_WEBAPP_NAME }}" \
+              --client-affinity-enabled true \
+              --https-only true \
+              --output none
+
+      - name: Deploy
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          package: publish

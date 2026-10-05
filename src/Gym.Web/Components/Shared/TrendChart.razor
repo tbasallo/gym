@@ -1,0 +1,107 @@
+@* Single-series line chart (top weight per session). Hollow points mark sessions that missed targets. *@
+
+@if (Points.Count == 0)
+{
+    <div class="empty">No history yet.</div>
+}
+else
+{
+    <svg class="chart" viewBox="0 0 @W @H" role="img" aria-label="@Label">
+        <g class="grid">
+            @foreach (var tick in ticks)
+            {
+                <line x1="@Pad.L" x2="@(W - Pad.R)" y1="@F(Y(tick))" y2="@F(Y(tick))" />
+            }
+        </g>
+        <g class="axis">
+            @foreach (var tick in ticks)
+            {
+                @Text(Pad.L - 6, Y(tick) + 4, "end", tick.ToString("0.#"))
+            }
+            @Text(Pad.L, H - 4, "start", Format(Points[0].DateUtc))
+            @if (Points.Count > 1)
+            {
+                @Text(W - Pad.R, H - 4, "end", Format(Points[^1].DateUtc))
+            }
+        </g>
+        @if (Points.Count > 1)
+        {
+            <polyline class="line" points="@string.Join(" ", Points.Select((p, i) => $"{F(X(i))},{F(Y(Value(p)))}"))" />
+        }
+        @for (var i = 0; i < Points.Count; i++)
+        {
+            var p = Points[i];
+            <g class="p">
+                <title>@Format(p.DateUtc): @Value(p).ToString("0.##") @Unit@(p.HitTargets ? " · hit targets" : " · missed targets")</title>
+                <rect class="hit-area" x="@F(X(i) - 12)" y="@Pad.T" width="24" height="@(H - Pad.T - Pad.B)" />
+                <circle class="pt @(p.HitTargets ? "" : "miss")" cx="@F(X(i))" cy="@F(Y(Value(p)))" r="4.5" />
+            </g>
+        }
+    </svg>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<TrendPoint> Points { get; set; } = [];
+    [Parameter] public Func<TrendPoint, decimal> Value { get; set; } = p => p.TopWeight;
+    [Parameter] public Func<DateTime, DateTime> ToLocal { get; set; } = d => d;
+    [Parameter] public string Unit { get; set; } = "lb";
+    [Parameter] public string Label { get; set; } = "Top weight per session";
+
+    private const int W = 640;
+    private const int H = 220;
+    private static readonly (int L, int R, int T, int B) Pad = (44, 14, 12, 24);
+    private List<decimal> ticks = [];
+    private decimal min;
+    private decimal max;
+
+    protected override void OnParametersSet()
+    {
+        if (Points.Count == 0)
+        {
+            return;
+        }
+
+        var values = Points.Select(Value).ToList();
+        var lo = values.Min();
+        var hi = values.Max();
+        var span = Math.Max(hi - lo, 10);
+        var step = NiceStep(span / 4);
+        min = Math.Floor((lo - step / 2) / step) * step;
+        max = Math.Ceiling((hi + step / 2) / step) * step;
+        min = Math.Max(0, min);
+        ticks = [];
+        for (var t = min; t <= max; t += step)
+        {
+            ticks.Add(t);
+        }
+    }
+
+    private static decimal NiceStep(decimal raw)
+    {
+        foreach (var s in new[] { 1m, 2.5m, 5m, 10m, 20m, 25m, 50m, 100m })
+        {
+            if (raw <= s)
+            {
+                return s;
+            }
+        }
+
+        return 200m;
+    }
+
+    private double X(int i) => Points.Count == 1
+        ? (Pad.L + W - Pad.R) / 2.0
+        : Pad.L + i * (W - Pad.L - Pad.R) / (double)(Points.Count - 1);
+
+    private double Y(decimal v) => max == min
+        ? H / 2.0
+        : Pad.T + (double)((max - v) / (max - min)) * (H - Pad.T - Pad.B);
+
+    private static string F(double d) => d.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    // Razor reserves <text>, so SVG text elements are emitted as markup.
+    private static MarkupString Text(double x, double y, string anchor, string content) =>
+        new($"<text x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\">{System.Net.WebUtility.HtmlEncode(content)}</text>");
+
+    private string Format(DateTime utc) => ToLocal(utc).ToString("MMM d");
+}

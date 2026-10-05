@@ -1,0 +1,219 @@
+@page "/schedules/{Id:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AppPage
+@inject ScheduleService ScheduleSvc
+@inject ExerciseService ExerciseLibrary
+
+<PageTitle>@(schedule?.Name ?? "Schedule") · Gym</PageTitle>
+
+@if (schedule is null)
+{
+    @if (loaded)
+    {
+        <div class="empty">Schedule not found. <a href="schedules">All schedules</a></div>
+    }
+}
+else
+{
+    var next = ScheduleService.NextDay(schedule);
+    <div class="stack">
+        <div>
+            <a href="schedules" class="muted small">← Schedules</a>
+            <div class="row-between">
+                @if (renaming)
+                {
+                    <div class="row-gap flex-grow-1">
+                        <input class="form-control" style="max-width: 360px" @bind="nameDraft" />
+                        <button class="btn btn-accent" @onclick="() => Run(async () => { await ScheduleSvc.RenameAsync(Id, UserId, nameDraft); renaming = false; })">Save</button>
+                        <button class="btn btn-soft" @onclick="() => renaming = false">Cancel</button>
+                    </div>
+                }
+                else
+                {
+                    <h1 class="mb-0">
+                        @schedule.Name
+                        <button class="btn btn-link btn-sm" @onclick="() => { nameDraft = schedule.Name; renaming = true; }">Rename</button>
+                    </h1>
+                }
+                <span class="pill">@(schedule.Group is null ? "Personal" : $"Shared · {schedule.Group.Name}")</span>
+            </div>
+        </div>
+
+        @if (Error is not null)
+        {
+            <div class="alert-x">@Error</div>
+        }
+
+        @foreach (var day in schedule.Days)
+        {
+            var isNext = day.Id == next?.Id;
+            <section class="card-x stack-sm" style="@(isNext ? "border-color: var(--accent)" : "")">
+                <div class="row-between">
+                    @if (editingDayId == day.Id)
+                    {
+                        <div class="row-gap flex-grow-1">
+                            <input class="form-control" style="max-width: 300px" @bind="dayNameDraft" />
+                            <button class="btn btn-accent btn-sm" @onclick="() => Run(async () => { await ScheduleSvc.RenameDayAsync(Id, UserId, day.Id, dayNameDraft); editingDayId = null; })">Save</button>
+                            <button class="btn btn-soft btn-sm" @onclick="() => editingDayId = null">Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <h2 class="mb-0">
+                            <span class="muted num">#@day.Order</span> @day.Name
+                            @if (isNext)
+                            {
+                                <span class="pill pill-accent ms-1 align-middle">Up next</span>
+                            }
+                        </h2>
+                    }
+                    <div class="row-gap">
+                        <button class="btn btn-soft btn-icon btn-sm" title="Move up" disabled="@(day.Order == 1)" @onclick="() => Run(() => ScheduleSvc.MoveDayAsync(Id, UserId, day.Id, -1))">↑</button>
+                        <button class="btn btn-soft btn-icon btn-sm" title="Move down" disabled="@(day.Order == schedule.Days.Count)" @onclick="() => Run(() => ScheduleSvc.MoveDayAsync(Id, UserId, day.Id, 1))">↓</button>
+                        <div class="dropdown">
+                            <button class="btn btn-soft btn-sm" @onclick="() => menuDayId = menuDayId == day.Id ? null : day.Id">⋯</button>
+                            @if (menuDayId == day.Id)
+                            {
+                                <div class="dropdown-menu show" style="right: 0; left: auto">
+                                    <button class="dropdown-item" @onclick="() => { dayNameDraft = day.Name; editingDayId = day.Id; menuDayId = null; }">Rename</button>
+                                    @if (!isNext)
+                                    {
+                                        <button class="dropdown-item" @onclick="() => Run(() => ScheduleSvc.SetNextDayAsync(Id, UserId, day.Id))">Make this up next</button>
+                                    }
+                                    <button class="dropdown-item text-danger" @onclick="() => Run(() => ScheduleSvc.DeleteDayAsync(Id, UserId, day.Id))">Delete day</button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                @if (day.Exercises.Count > 0)
+                {
+                    <div class="table-wrap">
+                        <table class="table-x">
+                            <thead>
+                                <tr>
+                                    <th>Exercise</th>
+                                    <th style="width: 80px">Sets</th>
+                                    <th style="width: 80px">Reps</th>
+                                    <th style="width: 90px">Rest (s)</th>
+                                    <th style="width: 130px"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in day.Exercises)
+                                {
+                                    var edit = Edit(item);
+                                    <tr>
+                                        <td><a href="exercises/@item.ExerciseId">@item.Exercise.Name</a></td>
+                                        <td><input type="number" min="1" class="form-control form-control-sm" @bind="edit.Sets" @bind:after="() => Save(day, item)" /></td>
+                                        <td><input type="number" min="1" class="form-control form-control-sm" @bind="edit.Reps" @bind:after="() => Save(day, item)" /></td>
+                                        <td><input type="number" min="0" step="15" class="form-control form-control-sm" placeholder="default" @bind="edit.Rest" @bind:after="() => Save(day, item)" /></td>
+                                        <td class="text-end text-nowrap">
+                                            <button class="btn btn-soft btn-icon btn-sm" title="Move up" @onclick="() => Run(() => ScheduleSvc.MoveExerciseAsync(Id, UserId, day.Id, item.Id, -1))">↑</button>
+                                            <button class="btn btn-soft btn-icon btn-sm" title="Move down" @onclick="() => Run(() => ScheduleSvc.MoveExerciseAsync(Id, UserId, day.Id, item.Id, 1))">↓</button>
+                                            <button class="btn btn-soft btn-icon btn-sm" title="Remove" @onclick="() => Run(() => ScheduleSvc.RemoveExerciseAsync(Id, UserId, day.Id, item.Id))">✕</button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else
+                {
+                    <div class="muted small">No exercises yet.</div>
+                }
+
+                @if (addingToDayId == day.Id)
+                {
+                    <div class="card-x" style="background: var(--surface-2)">
+                        <div class="row-between mb-2">
+                            <strong>Add to @day.Name</strong>
+                            <button class="btn btn-sm btn-soft" @onclick="() => addingToDayId = null">Done</button>
+                        </div>
+                        <ExercisePicker Exercises="library" OnPick="e => Run(() => ScheduleSvc.AddExerciseAsync(Id, UserId, day.Id, e.Id, 3, 10))" />
+                    </div>
+                }
+                else
+                {
+                    <div>
+                        <button class="btn btn-soft btn-sm" @onclick="() => addingToDayId = day.Id">＋ Add exercise</button>
+                    </div>
+                }
+            </section>
+        }
+
+        <div class="card-x">
+            <h3>Add a day</h3>
+            <div class="row-gap">
+                <input class="form-control" style="max-width: 300px" placeholder="e.g. Leg Day" @bind="newDay" @bind:event="oninput" />
+                <button class="btn btn-accent" disabled="@(Busy || string.IsNullOrWhiteSpace(newDay))" @onclick="() => Run(async () => { await ScheduleSvc.AddDayAsync(Id, UserId, newDay); newDay = string.Empty; })">Add day #@(schedule.Days.Count + 1)</button>
+            </div>
+        </div>
+
+        <div>
+            @if (schedule.IsArchived)
+            {
+                <button class="btn btn-soft" @onclick="() => Run(() => ScheduleSvc.SetArchivedAsync(Id, UserId, false))">Restore schedule</button>
+            }
+            else
+            {
+                <button class="btn btn-link text-danger" @onclick="() => Run(() => ScheduleSvc.SetArchivedAsync(Id, UserId, true))">Archive schedule</button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private sealed class ItemEdit
+    {
+        public int Sets { get; set; }
+        public int Reps { get; set; }
+        public int? Rest { get; set; }
+    }
+
+    private Schedule? schedule;
+    private bool loaded;
+    private List<Exercise> library = [];
+    private Dictionary<int, ItemEdit> edits = [];
+    private bool renaming;
+    private string nameDraft = "";
+    private int? editingDayId;
+    private string dayNameDraft = "";
+    private int? menuDayId;
+    private int? addingToDayId;
+    private string newDay = "";
+
+    protected override async Task LoadAsync()
+    {
+        schedule = await ScheduleSvc.GetAsync(Id, UserId);
+        loaded = true;
+        edits = [];
+        menuDayId = null;
+        if (library.Count == 0)
+        {
+            library = await ExerciseLibrary.SearchAsync();
+        }
+    }
+
+    private ItemEdit Edit(ScheduleDayExercise item)
+    {
+        if (!edits.TryGetValue(item.Id, out var edit))
+        {
+            edit = new ItemEdit { Sets = item.TargetSets, Reps = item.TargetReps, Rest = item.RestSeconds };
+            edits[item.Id] = edit;
+        }
+
+        return edit;
+    }
+
+    private Task Save(ScheduleDay day, ScheduleDayExercise item)
+    {
+        var edit = Edit(item);
+        return Run(() => ScheduleSvc.UpdateExerciseAsync(Id, UserId, day.Id, item.Id, edit.Sets, edit.Reps, edit.Rest, item.Notes));
+    }
+}

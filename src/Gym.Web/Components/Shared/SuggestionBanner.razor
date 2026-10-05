@@ -1,0 +1,29 @@
+@* The progression engine's call for the next session. *@
+
+<div class="suggest @Css" style="font-size: .92rem; padding: 10px 12px">
+    <div>
+        <strong>@Headline@(Suggestion.Weight is { } w ? $" {w:0.##} {Unit}" : "")</strong>
+        <span class="pill ms-1">@Suggestion.Rule</span>
+    </div>
+    <div class="muted">@Suggestion.Reason</div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ProgressionSuggestion Suggestion { get; set; } = null!;
+    [Parameter] public string Unit { get; set; } = "lb";
+
+    private string Css => Suggestion.Kind switch
+    {
+        SuggestionKind.Increase => "increase",
+        SuggestionKind.Deload => "deload",
+        _ => "",
+    };
+
+    private string Headline => Suggestion.Kind switch
+    {
+        SuggestionKind.Increase => "Next time: move up to",
+        SuggestionKind.Deload => "Next time: drop to",
+        SuggestionKind.Establish => "Next time: find your weight",
+        _ => "Next time: stay at",
+    };
+}

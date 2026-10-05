@@ -1,0 +1,142 @@
+@page "/reports"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AppPage
+@inject StatsService Stats
+@inject GroupService Groups
+
+<PageTitle>Reports · Gym</PageTitle>
+
+<div class="stack">
+    <div class="row-between">
+        <h1 class="mb-0">Reports</h1>
+        @if (teammates.Count > 1)
+        {
+            <div class="row-gap" role="group" aria-label="Person">
+                @foreach (var t in teammates)
+                {
+                    <button class="btn btn-sm @(t.Id == selectedId ? "btn-accent" : "btn-soft")" @onclick="() => Select(t.Id)">@t.Name</button>
+                }
+            </div>
+        }
+    </div>
+
+    @if (loaded)
+    {
+        var unit = Selected?.WeightUnit ?? Unit;
+        var ready = summaries.Count(s => s.Suggestion.Kind == SuggestionKind.Increase);
+        <div class="tiles">
+            <div class="tile"><div class="label">Workouts</div><div class="value">@activity.Total</div><div class="sub">all time</div></div>
+            <div class="tile"><div class="label">Last 30 days</div><div class="value">@activity.Last30Days</div><div class="sub">@activity.Last7Days this week</div></div>
+            <div class="tile"><div class="label">Last workout</div><div class="value" style="font-size: 1.05rem">@(activity.LastUtc is { } lastWorkout ? Local(lastWorkout, "ddd MMM d") : "—")</div></div>
+            <div class="tile"><div class="label">Ready to move up</div><div class="value" style="color: var(--good)">@ready</div><div class="sub">exercise@(ready == 1 ? "" : "s")</div></div>
+        </div>
+
+        @if (summaries.Count == 0)
+        {
+            <div class="empty">No finished workouts yet. Reports fill in after the first session.</div>
+        }
+        else
+        {
+            <div class="row-gap">
+                @foreach (var (key, label) in Filters)
+                {
+                    <button class="btn btn-sm @(filter == key ? "btn-accent" : "btn-soft")" @onclick="() => filter = key">@label</button>
+                }
+            </div>
+
+            <div class="card-x table-wrap" style="padding: 4px 8px">
+                <table class="table-x">
+                    <thead>
+                        <tr>
+                            <th>Exercise</th>
+                            <th>First</th>
+                            <th>Last</th>
+                            <th class="text-end">Sessions</th>
+                            <th>Range (@unit)</th>
+                            <th class="text-end">Current</th>
+                            <th class="text-end">Est. 1RM</th>
+                            <th class="text-end" title="Sessions in a row hitting every target">Streak</th>
+                            <th>Next time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in Visible)
+                        {
+                            var st = s.Stats;
+                            <tr>
+                                <td><a href="exercises/@s.Exercise.Id?user=@selectedId" class="fw-semibold">@s.Exercise.Name</a></td>
+                                <td class="text-nowrap muted">@(st.FirstUtc is { } f ? Local(f, "MMM d, yy") : "")</td>
+                                <td class="text-nowrap">@(st.LastUtc is { } l ? Local(l, "MMM d") : "")</td>
+                                <td class="text-end num">@st.SessionCount</td>
+                                <td class="num text-nowrap">@W(st.MinWeight)–@W(st.MaxWeight)</td>
+                                <td class="text-end num fw-semibold">@W(st.LastTopWeight)</td>
+                                <td class="text-end num">@W(st.BestEstimated1RM)</td>
+                                <td class="text-end num">@st.TargetStreak</td>
+                                <td class="text-nowrap" title="@s.Suggestion.Reason">
+                                    @switch (s.Suggestion.Kind)
+                                    {
+                                        case SuggestionKind.Increase:
+                                            <span class="pill pill-good">↑ @W(s.Suggestion.Weight)</span>
+                                            break;
+                                        case SuggestionKind.Deload:
+                                            <span class="pill pill-warn">↓ @W(s.Suggestion.Weight)</span>
+                                            break;
+                                        default:
+                                            <span class="pill">= @W(s.Suggestion.Weight)</span>
+                                            break;
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="muted small">
+                Streak counts sessions in a row where every target set hit its target reps. "Next time" comes from the
+                progression rules (adjust them in <a href="settings">Settings</a>). Hover or tap a suggestion for the reason.
+            </p>
+        }
+    }
+</div>
+
+@code {
+    private static readonly (string Key, string Label)[] Filters =
+        [("all", "All"), ("up", "Ready to move up"), ("stalled", "Needs attention"), ("recent", "Last 30 days")];
+
+    private bool loaded;
+    private List<ApplicationUser> teammates = [];
+    private string selectedId = "";
+    private List<ExerciseSummary> summaries = [];
+    private (int Total, int Last30Days, int Last7Days, DateTime? LastUtc) activity;
+    private string filter = "all";
+
+    private ApplicationUser? Selected => teammates.FirstOrDefault(t => t.Id == selectedId);
+
+    private IEnumerable<ExerciseSummary> Visible => filter switch
+    {
+        "up" => summaries.Where(s => s.Suggestion.Kind == SuggestionKind.Increase),
+        "stalled" => summaries.Where(s => s.Suggestion.Kind == SuggestionKind.Deload || (s.Stats.Trend.Count > 0 && !s.Stats.Trend[^1].HitTargets)),
+        "recent" => summaries.Where(s => s.Stats.LastUtc >= DateTime.UtcNow.AddDays(-30)),
+        _ => summaries,
+    };
+
+    protected override async Task LoadAsync()
+    {
+        if (teammates.Count == 0)
+        {
+            teammates = await Groups.GetTeammatesAsync(UserId);
+            selectedId = UserId;
+        }
+
+        summaries = await Stats.GetSummariesAsync(selectedId);
+        activity = await Stats.GetActivityAsync(selectedId);
+        loaded = true;
+    }
+
+    private async Task Select(string id)
+    {
+        selectedId = id;
+        await LoadAsync();
+    }
+}

@@ -1,0 +1,174 @@
+@* One person's column on the workout screen for a single exercise. *@
+
+<div class="person p@(Index % 4)">
+    <div class="person-name">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="text-truncate">@User.Name</span>
+        <span class="ms-auto pill num">@done/@targetSets</span>
+    </div>
+
+    @if (Plan is not null && ReadOnly is false)
+    {
+        var s = Plan.Suggestion;
+        <div class="suggest @(s.Kind == SuggestionKind.Increase ? "increase" : s.Kind == SuggestionKind.Deload ? "deload" : "")" title="@s.Reason">
+            @if (s.Weight is not null)
+            {
+                <div>
+                    @(s.Kind switch { SuggestionKind.Increase => "↑ Move up to", SuggestionKind.Deload => "↓ Drop to", SuggestionKind.Establish => "Start around", _ => "Stay at" })
+                    <strong>@s.Weight.Value.ToString("0.##") @Unit</strong>
+                </div>
+            }
+            <div class="muted">@s.Reason</div>
+            @if (Plan.Last is { } last)
+            {
+                <div class="muted mt-1">Last: @string.Join(", ", last.Sets.Select(x => $"{x.Reps}×{x.Weight:0.##}"))</div>
+            }
+        </div>
+    }
+
+    @if (mySets.Count > 0)
+    {
+        <ul class="sets">
+            @foreach (var set in mySets)
+            {
+                if (editingId == set.Id)
+                {
+                    <li style="display:block; cursor: default">
+                        <div class="row-gap mb-1">
+                            <input type="number" inputmode="numeric" class="form-control form-control-sm" style="width: 70px" @bind="editReps" aria-label="Reps" />
+                            <span>×</span>
+                            <input type="number" inputmode="decimal" step="any" class="form-control form-control-sm" style="width: 80px" @bind="editWeight" aria-label="Weight" />
+                        </div>
+                        <div class="row-gap">
+                            <button class="btn btn-sm btn-accent" @onclick="SaveEdit">Save</button>
+                            <button class="btn btn-sm btn-soft" @onclick="() => editingId = null">Cancel</button>
+                            <button class="btn btn-sm btn-link text-danger ms-auto" @onclick="() => Delete(set.Id)">Delete</button>
+                        </div>
+                    </li>
+                }
+                else if (!set.IsInProgress)
+                {
+                    <li class="@(set.Reps >= set.TargetReps ? "hit" : "miss")" @onclick="() => BeginEdit(set)" title="Tap to edit">
+                        <span class="idx">@set.SetNumber</span>
+                        <span class="what">@set.Reps × @set.Weight.ToString("0.##")</span>
+                        <span class="dur">@(set.Duration is { } d ? AppClock(d) : "")</span>
+                    </li>
+                }
+            }
+        </ul>
+    }
+
+    @if (!ReadOnly)
+    {
+        @if (running is not null)
+        {
+            <div class="timer-box running">
+                <div class="l">Set @running.SetNumber in progress</div>
+                <div class="t">@AppClock(Now - running.StartedUtc!.Value)</div>
+            </div>
+        }
+        else if (LastCompletedUtc is { } lastDone && Now - lastDone < TimeSpan.FromMinutes(15))
+        {
+            var rest = Now - lastDone;
+            var ready = rest.TotalSeconds >= RestGoalSeconds;
+            <div class="timer-box @(ready ? "ready" : "rest")">
+                <div class="l">@(ready ? "Rested · go" : "Resting")</div>
+                <div class="t">@AppClock(rest)</div>
+                <div class="l" style="opacity: .8">goal @AppClock(TimeSpan.FromSeconds(RestGoalSeconds))</div>
+            </div>
+        }
+
+        <div>
+            <div class="stepper-label">Weight (@Unit)</div>
+            <div class="stepper">
+                <button class="btn btn-soft" @onclick="() => Draft.Weight = Math.Max(0, Draft.Weight - WeightStep)" aria-label="Less weight">−</button>
+                <input type="number" inputmode="decimal" step="any" class="form-control" @bind="Draft.Weight" aria-label="Weight" />
+                <button class="btn btn-soft" @onclick="() => Draft.Weight += WeightStep" aria-label="More weight">+</button>
+            </div>
+        </div>
+        <div>
+            <div class="stepper-label">Reps</div>
+            <div class="stepper">
+                <button class="btn btn-soft" @onclick="() => Draft.Reps = Math.Max(0, Draft.Reps - 1)" aria-label="Fewer reps">−</button>
+                <input type="number" inputmode="numeric" class="form-control" @bind="Draft.Reps" aria-label="Reps" />
+                <button class="btn btn-soft" @onclick="() => Draft.Reps++" aria-label="More reps">+</button>
+            </div>
+        </div>
+
+        @if (running is not null)
+        {
+            <button class="btn btn-accent btn-lg" disabled="@Busy" @onclick="() => OnComplete.InvokeAsync((running.Id, Draft.Reps, Draft.Weight))">■ End set</button>
+        }
+        else
+        {
+            <div class="actions-2">
+                <button class="btn btn-soft" disabled="@Busy" @onclick="() => OnStart.InvokeAsync(Draft.Weight)" title="Start the set timer">▶ Start</button>
+                <button class="btn btn-accent" disabled="@Busy" @onclick="() => OnLog.InvokeAsync((Draft.Reps, Draft.Weight))" title="Log a set without the timer">✓ Log set</button>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationUser User { get; set; } = null!;
+    [Parameter, EditorRequired] public SessionExercise Exercise { get; set; } = null!;
+    [Parameter, EditorRequired] public IReadOnlyList<SetLog> Sets { get; set; } = [];
+    [Parameter, EditorRequired] public SetDraft Draft { get; set; } = null!;
+    [Parameter] public PlannedExercise? Plan { get; set; }
+    [Parameter] public int Index { get; set; }
+    [Parameter] public DateTime Now { get; set; }
+    [Parameter] public DateTime? LastCompletedUtc { get; set; }
+    [Parameter] public int RestGoalSeconds { get; set; } = 90;
+    [Parameter] public int? TargetSetsOverride { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<decimal> OnStart { get; set; }
+    [Parameter] public EventCallback<(int SetId, int Reps, decimal Weight)> OnComplete { get; set; }
+    [Parameter] public EventCallback<(int Reps, decimal Weight)> OnLog { get; set; }
+    [Parameter] public EventCallback<(int SetId, int Reps, decimal Weight)> OnUpdate { get; set; }
+    [Parameter] public EventCallback<int> OnDelete { get; set; }
+
+    private List<SetLog> mySets = [];
+    private SetLog? running;
+    private int done;
+    private int targetSets;
+    private int? editingId;
+    private int editReps;
+    private decimal editWeight;
+
+    private string Unit => User.WeightUnit;
+    private decimal WeightStep => string.Equals(Unit, "kg", StringComparison.OrdinalIgnoreCase) ? 2.5m : 5m;
+
+    protected override void OnParametersSet()
+    {
+        mySets = Sets.Where(s => s.UserId == User.Id && s.SessionExerciseId == Exercise.Id).OrderBy(s => s.SetNumber).ToList();
+        running = mySets.FirstOrDefault(s => s.IsInProgress);
+        done = mySets.Count(s => !s.IsInProgress);
+        targetSets = TargetSetsOverride ?? Exercise.TargetSets;
+    }
+
+    private void BeginEdit(SetLog set)
+    {
+        editingId = set.Id;
+        editReps = set.Reps;
+        editWeight = set.Weight;
+    }
+
+    private async Task SaveEdit()
+    {
+        if (editingId is { } id)
+        {
+            editingId = null;
+            await OnUpdate.InvokeAsync((id, editReps, editWeight));
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        editingId = null;
+        await OnDelete.InvokeAsync(id);
+    }
+
+    private static string AppClock(TimeSpan span) =>
+        span < TimeSpan.Zero ? "0:00" : span.TotalHours >= 1 ? $"{(int)span.TotalHours}:{span.Minutes:00}:{span.Seconds:00}" : $"{(int)span.TotalMinutes}:{span.Seconds:00}";
+}

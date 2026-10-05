@@ -1,0 +1,37 @@
+@* Search the exercise library and pick one. *@
+
+<div class="stack-sm">
+    <input class="form-control" placeholder="Search exercises (name, muscle, category)" @bind="term" @bind:event="oninput" />
+    <div style="max-height: 260px; overflow-y: auto">
+        <ul class="list-x">
+            @foreach (var e in Matches.Take(30))
+            {
+                <li class="row-between" style="padding: 6px 0">
+                    <div>
+                        <div class="fw-semibold">@e.Name</div>
+                        <div class="muted small">@e.Category@(string.IsNullOrEmpty(e.Muscles) ? "" : $" · {e.Muscles}")</div>
+                    </div>
+                    <button class="btn btn-sm btn-soft" @onclick="() => OnPick.InvokeAsync(e)">@ActionLabel</button>
+                </li>
+            }
+        </ul>
+        @if (!Matches.Any())
+        {
+            <div class="muted small">No match. <a href="exercises/new">Create "@term"</a></div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<Exercise> Exercises { get; set; } = [];
+    [Parameter] public EventCallback<Exercise> OnPick { get; set; }
+    [Parameter] public string ActionLabel { get; set; } = "Add";
+
+    private string term = "";
+
+    private IEnumerable<Exercise> Matches => string.IsNullOrWhiteSpace(term)
+        ? Exercises
+        : Exercises.Where(e => Contains(e.Name) || Contains(e.Muscles) || Contains(e.Category) || Contains(e.Equipment));
+
+    private bool Contains(string? value) => value?.Contains(term.Trim(), StringComparison.OrdinalIgnoreCase) == true;
+}

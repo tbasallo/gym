@@ -1,0 +1,554 @@
+@page "/exercises/{Id:int}"
+@page "/exercises/new"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AppPage
+@inject ExerciseService ExerciseLibrary
+@inject StatsService Stats
+@inject GroupService Groups
+@inject YouTubeClient YouTube
+@inject NavigationManager Nav
+
+<PageTitle>@(exercise?.Name is { Length: > 0 } n ? n : "New exercise") · Gym</PageTitle>
+
+@if (exercise is null)
+{
+    @if (loaded)
+    {
+        <div class="empty">Exercise not found. <a href="exercises">All exercises</a></div>
+    }
+}
+else
+{
+    <div class="stack">
+        <div>
+            <a href="exercises" class="muted small">← Exercises</a>
+            <div class="row-between">
+                <h1 class="mb-0">@(IsNew ? "New exercise" : exercise.Name)</h1>
+                @if (!IsNew && !editing)
+                {
+                    <button class="btn btn-soft btn-sm" @onclick="StartEdit">Edit</button>
+                }
+            </div>
+            @if (!IsNew && !editing)
+            {
+                <div class="row-gap mt-1">
+                    <span class="pill">@exercise.BodyRegion</span>
+                    @if (!string.IsNullOrEmpty(exercise.Category))
+                    {
+                        <span class="pill">@exercise.Category</span>
+                    }
+                    @if (!string.IsNullOrEmpty(exercise.Equipment))
+                    {
+                        <span class="pill">@exercise.Equipment</span>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (Error is not null)
+        {
+            <div class="alert-x">@Error</div>
+        }
+        @if (Notice is not null)
+        {
+            <div class="alert-x ok">@Notice</div>
+        }
+
+        @if (editing)
+        {
+            <section class="card-x stack-sm">
+                <h3>Look it up online</h3>
+                <p class="muted small mb-1">Pulls the description, muscles, equipment and an image from the free wger.de exercise database.</p>
+                <div class="row-gap">
+                    <input class="form-control" style="max-width: 340px" placeholder="e.g. squat" @bind="lookupTerm" @bind:event="oninput" />
+                    <button class="btn btn-soft" disabled="@(Busy || string.IsNullOrWhiteSpace(lookupTerm))" @onclick="() => Run(Lookup, reload: false)">Search</button>
+                </div>
+                @if (lookupResults is not null)
+                {
+                    @if (lookupResults.Count == 0)
+                    {
+                        <div class="muted small">Nothing found (or the service is unreachable). Fill in the details below.</div>
+                    }
+                    <ul class="list-x">
+                        @foreach (var r in lookupResults.Take(10))
+                        {
+                            <li class="row-between" style="padding: 6px 0">
+                                <div class="row-gap">
+                                    @if (r.ImageUrl is not null)
+                                    {
+                                        <img src="@r.ImageUrl" alt="" width="40" height="40" style="object-fit: contain; background: #fff; border-radius: 6px" />
+                                    }
+                                    <div>
+                                        <div class="fw-semibold">@r.Name</div>
+                                        <div class="muted small">@r.Category</div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-soft" disabled="@Busy" @onclick="() => Run(() => ApplyLookup(r), reload: false)">Use</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+
+            <section class="card-x">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label" for="ex-name">Name</label>
+                        <input id="ex-name" class="form-control" @bind="form.Name" />
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <label class="form-label" for="ex-region">Body region</label>
+                        <select id="ex-region" class="form-select" @bind="form.BodyRegion">
+                            @foreach (var r in Enum.GetValues<BodyRegion>())
+                            {
+                                <option value="@r">@r</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <label class="form-label" for="ex-cat">Category</label>
+                        <input id="ex-cat" class="form-control" placeholder="Legs, Chest..." @bind="form.Category" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="ex-muscles">Muscles</label>
+                        <input id="ex-muscles" class="form-control" @bind="form.Muscles" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="ex-eq">Equipment</label>
+                        <input id="ex-eq" class="form-control" @bind="form.Equipment" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="ex-desc">How to do it</label>
+                        <textarea id="ex-desc" class="form-control" rows="5" @bind="form.Description"></textarea>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label" for="ex-img">Image URL</label>
+                        <input id="ex-img" class="form-control" @bind="form.ImageUrl" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="ex-inc">Weight step for "move up" (optional)</label>
+                        <input id="ex-inc" type="number" step="any" class="form-control" placeholder="use my settings" @bind="form.WeightIncrement" />
+                    </div>
+                </div>
+                <div class="row-gap mt-3">
+                    <button class="btn btn-accent" disabled="@Busy" @onclick="() => Run(Save, reload: false)">Save</button>
+                    <button class="btn btn-soft" @onclick="CancelEdit">Cancel</button>
+                    @if (!IsNew)
+                    {
+                        <button class="btn btn-link text-danger ms-auto" disabled="@Busy" @onclick="() => Run(Delete, reload: false)">Delete</button>
+                    }
+                </div>
+            </section>
+        }
+
+        @if (!IsNew)
+        {
+            var primary = exercise.Videos.FirstOrDefault(v => v.IsPrimary) ?? exercise.Videos.FirstOrDefault();
+            <div class="row g-3">
+                <div class="col-lg-7 stack-sm">
+                    @if (primary is not null)
+                    {
+                        <VideoEmbed YouTubeId="@primary.YouTubeId" Title="@primary.Title" />
+                    }
+                    @if (!editing)
+                    {
+                        <div class="card-x stack-sm">
+                            <div class="row g-3">
+                                @if (!string.IsNullOrEmpty(exercise.ImageUrl))
+                                {
+                                    <div class="col-sm-4"><img class="ex-image" src="@exercise.ImageUrl" alt="@exercise.Name" /></div>
+                                }
+                                <div class="col">
+                                    @if (!string.IsNullOrEmpty(exercise.Description))
+                                    {
+                                        <p style="white-space: pre-line">@exercise.Description</p>
+                                    }
+                                    else
+                                    {
+                                        <p class="muted">No description yet. Use Edit → Look it up online.</p>
+                                    }
+                                    @if (!string.IsNullOrEmpty(exercise.Muscles))
+                                    {
+                                        <div class="small"><span class="muted">Muscles:</span> @exercise.Muscles</div>
+                                    }
+                                    @if (exercise.ExternalSource == WgerClient.Source)
+                                    {
+                                        <div class="small muted mt-1">Details from <a href="https://wger.de/en/exercise/@exercise.ExternalId/view/" target="_blank" rel="noopener">wger.de</a></div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="col-lg-5">
+                    <section class="card-x stack-sm">
+                        <h3 class="mb-0">Videos</h3>
+                        @if (exercise.Videos.Count > 0)
+                        {
+                            <ul class="list-x">
+                                @foreach (var v in exercise.Videos)
+                                {
+                                    <li>
+                                        <div class="video-thumb">
+                                            <a href="@YouTubeClient.WatchUrl(v.YouTubeId)" target="_blank" rel="noopener"><img src="@YouTubeClient.ThumbnailUrl(v.YouTubeId)" alt="" /></a>
+                                            <div>
+                                                <div class="small fw-semibold">@v.Title</div>
+                                                <div class="muted small">@v.Channel</div>
+                                                <div class="row-gap mt-1">
+                                                    @if (v.IsPrimary)
+                                                    {
+                                                        <span class="pill pill-accent">Main</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button class="btn btn-link btn-sm p-0" @onclick="() => Run(() => ExerciseLibrary.SetPrimaryVideoAsync(exercise.Id, v.Id))">Make main</button>
+                                                    }
+                                                    <button class="btn btn-link btn-sm p-0 text-danger" @onclick="() => Run(() => ExerciseLibrary.RemoveVideoAsync(exercise.Id, v.Id))">Remove</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+
+                        <div>
+                            <a class="btn btn-soft btn-sm" href="@YouTubeClient.SearchUrl(exercise.Name)" target="_blank" rel="noopener">Search YouTube ↗</a>
+                            @if (YouTube.IsConfigured)
+                            {
+                                <button class="btn btn-soft btn-sm" disabled="@Busy" @onclick="() => Run(FindVideos, reload: false)">Find videos here</button>
+                            }
+                        </div>
+
+                        <div>
+                            <label class="form-label" for="vid">Paste a YouTube link to save it</label>
+                            <div class="row-gap">
+                                <input id="vid" class="form-control" style="flex: 1; min-width: 180px" placeholder="https://youtu.be/..." @bind="videoUrl" @bind:event="oninput" />
+                                <button class="btn btn-accent" disabled="@(Busy || string.IsNullOrWhiteSpace(videoUrl))" @onclick="() => Run(SaveVideoUrl)">Save</button>
+                            </div>
+                        </div>
+
+                        @if (videoResults is not null)
+                        {
+                            <ul class="list-x">
+                                @foreach (var r in videoResults)
+                                {
+                                    var saved = exercise.Videos.Any(v => v.YouTubeId == r.YouTubeId);
+                                    <li>
+                                        <div class="video-thumb">
+                                            <a href="@YouTubeClient.WatchUrl(r.YouTubeId)" target="_blank" rel="noopener"><img src="@(r.ThumbnailUrl ?? YouTubeClient.ThumbnailUrl(r.YouTubeId))" alt="" /></a>
+                                            <div>
+                                                <div class="small fw-semibold">@r.Title</div>
+                                                <div class="muted small">@r.Channel</div>
+                                                <div class="row-gap mt-1">
+                                                    <button class="btn btn-link btn-sm p-0" @onclick="() => previewId = r.YouTubeId">Preview</button>
+                                                    @if (saved)
+                                                    {
+                                                        <span class="pill pill-good">Saved</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button class="btn btn-link btn-sm p-0" @onclick="() => Run(() => SaveVideo(r))">Save</button>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                        @if (previewId == r.YouTubeId)
+                                        {
+                                            <div class="mt-2"><VideoEmbed YouTubeId="@r.YouTubeId" Title="@r.Title" /></div>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </section>
+                </div>
+            </div>
+
+            <section class="card-x stack-sm">
+                <div class="row-between">
+                    <h2 class="mb-0">Progress</h2>
+                    @if (teammates.Count > 1)
+                    {
+                        <select class="form-select" style="width: auto" value="@statsUserId" @onchange="e => ChangeUser(e.Value?.ToString())">
+                            @foreach (var t in teammates)
+                            {
+                                <option value="@t.Id">@t.Name</option>
+                            }
+                        </select>
+                    }
+                </div>
+
+                @if (summary is not null)
+                {
+                    var st = summary.Stats;
+                    var unit = StatsUser?.WeightUnit ?? Unit;
+                    <div class="tiles">
+                        <div class="tile"><div class="label">First time</div><div class="value" style="font-size: 1.05rem">@(st.FirstUtc is { } f ? Local(f, "MMM d, yyyy") : "—")</div></div>
+                        <div class="tile"><div class="label">Last time</div><div class="value" style="font-size: 1.05rem">@(st.LastUtc is { } l ? Local(l, "MMM d, yyyy") : "—")</div></div>
+                        <div class="tile"><div class="label">Sessions</div><div class="value">@st.SessionCount</div><div class="sub">@st.TotalSets sets</div></div>
+                        <div class="tile"><div class="label">Weight range</div><div class="value" style="font-size: 1.15rem">@W(st.MinWeight)–@W(st.MaxWeight)</div><div class="sub">@unit</div></div>
+                        <div class="tile"><div class="label">Est. 1-rep max</div><div class="value">@W(st.BestEstimated1RM)</div><div class="sub">best, @unit</div></div>
+                        <div class="tile"><div class="label">Target streak</div><div class="value">@st.TargetStreak</div><div class="sub">@st.SessionsAtCurrentWeight at @W(st.LastTopWeight)</div></div>
+                    </div>
+
+                    <SuggestionBanner Suggestion="summary.Suggestion" Unit="@unit" />
+
+                    @if (st.Trend.Count > 0)
+                    {
+                        <div class="row-gap">
+                            @foreach (var (key, label) in ChartModes)
+                            {
+                                <button class="btn btn-sm @(chartMode == key ? "btn-accent" : "btn-soft")" @onclick="() => chartMode = key">@label</button>
+                            }
+                        </div>
+                        <TrendChart Points="st.Trend" Value="ChartValue" ToLocal="Me.ToLocal" Unit="@unit"
+                                    Label="@ChartModes.First(m => m.Key == chartMode).Label" />
+                        <div class="muted small">Filled dots hit every target; hollow dots missed some reps.</div>
+                    }
+
+                    <details>
+                        <summary class="fw-semibold">Personal numbers</summary>
+                        <div class="row g-2 mt-1">
+                            <div class="col-4">
+                                <label class="form-label">Working weight</label>
+                                <input type="number" step="any" class="form-control" @bind="mine.WorkingWeight" />
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label">Own sets</label>
+                                <input type="number" min="1" class="form-control" placeholder="schedule" @bind="mine.TargetSets" />
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label">Own reps</label>
+                                <input type="number" min="1" class="form-control" placeholder="schedule" @bind="mine.TargetReps" />
+                            </div>
+                        </div>
+                        <p class="muted small mt-1 mb-2">Own sets/reps override the schedule's targets for @(StatsUser?.Name ?? "this person"). Working weight updates automatically after each session.</p>
+                        <button class="btn btn-soft btn-sm" disabled="@Busy" @onclick="() => Run(SaveNumbers)">Save numbers</button>
+                    </details>
+
+                    @if (history.Count > 0)
+                    {
+                        <div class="table-wrap">
+                            <table class="table-x">
+                                <thead><tr><th>Date</th><th>Sets (reps × weight)</th><th>Top</th><th>Volume</th><th>Time</th></tr></thead>
+                                <tbody>
+                                    @foreach (var h in history)
+                                    {
+                                        <tr>
+                                            <td class="text-nowrap"><a href="session/@h.SessionId">@Local(h.DateUtc, "MMM d")</a></td>
+                                            <td class="num">
+                                                @string.Join(", ", h.Performance.Sets.Select(s => $"{s.Reps}×{s.Weight:0.##}"))
+                                                @if (h.Performance.HitTargets)
+                                                {
+                                                    <span class="pill pill-good ms-1">✓</span>
+                                                }
+                                            </td>
+                                            <td class="num">@h.Performance.TopWeight.ToString("0.##")</td>
+                                            <td class="num">@h.Performance.Volume.ToString("#,0")</td>
+                                            <td class="num muted">@(h.TimeUnderLoad is { } t ? Clock(t) : "")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                }
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    [SupplyParameterFromQuery(Name = "user")] public string? QueryUser { get; set; }
+
+    private static readonly (string Key, string Label)[] ChartModes =
+        [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("volume", "Volume")];
+
+    private Exercise? exercise;
+    private Exercise form = new();
+    private bool loaded;
+    private bool editing;
+    private string lookupTerm = "";
+    private IReadOnlyList<ExerciseLookupResult>? lookupResults;
+    private IReadOnlyList<VideoResult>? videoResults;
+    private string? previewId;
+    private string videoUrl = "";
+    private List<ApplicationUser> teammates = [];
+    private string statsUserId = "";
+    private ExerciseSummary? summary;
+    private List<HistoryEntry> history = [];
+    private UserExerciseSetting mine = new();
+    private string chartMode = "top";
+
+    private bool IsNew => Id == 0;
+    private ApplicationUser? StatsUser => teammates.FirstOrDefault(t => t.Id == statsUserId);
+
+    private Func<TrendPoint, decimal> ChartValue => chartMode switch
+    {
+        "e1rm" => p => p.Estimated1RM,
+        "volume" => p => p.Volume,
+        _ => p => p.TopWeight,
+    };
+
+    protected override async Task LoadAsync()
+    {
+        if (IsNew)
+        {
+            exercise ??= new Exercise();
+            if (!editing)
+            {
+                form = new Exercise();
+                editing = true;
+            }
+
+            loaded = true;
+            return;
+        }
+
+        exercise = await ExerciseLibrary.GetAsync(Id);
+        loaded = true;
+        if (exercise is null)
+        {
+            return;
+        }
+
+        if (teammates.Count == 0)
+        {
+            teammates = await Groups.GetTeammatesAsync(UserId);
+            statsUserId = teammates.Any(t => t.Id == QueryUser) ? QueryUser! : UserId;
+        }
+
+        await LoadStatsAsync();
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        summary = await Stats.GetSummaryAsync(statsUserId, Id);
+        history = await Stats.GetHistoryAsync(statsUserId, Id);
+        mine = await Stats.GetUserExerciseAsync(statsUserId, Id);
+    }
+
+    private async Task ChangeUser(string? id)
+    {
+        if (id is null)
+        {
+            return;
+        }
+
+        statsUserId = id;
+        await LoadStatsAsync();
+    }
+
+    private void StartEdit()
+    {
+        form = new Exercise
+        {
+            Id = exercise!.Id,
+            Name = exercise.Name,
+            BodyRegion = exercise.BodyRegion,
+            Category = exercise.Category,
+            Muscles = exercise.Muscles,
+            Equipment = exercise.Equipment,
+            Description = exercise.Description,
+            ImageUrl = exercise.ImageUrl,
+            ExternalSource = exercise.ExternalSource,
+            ExternalId = exercise.ExternalId,
+            WeightIncrement = exercise.WeightIncrement,
+        };
+        lookupTerm = exercise.Name;
+        lookupResults = null;
+        editing = true;
+    }
+
+    private void CancelEdit()
+    {
+        if (IsNew)
+        {
+            Nav.NavigateTo("exercises");
+            return;
+        }
+
+        editing = false;
+    }
+
+    private async Task Lookup() => lookupResults = await ExerciseLibrary.LookupAsync(lookupTerm);
+
+    private async Task ApplyLookup(ExerciseLookupResult result)
+    {
+        if (string.IsNullOrWhiteSpace(form.Name))
+        {
+            form.Name = result.Name;
+        }
+
+        if (!await ExerciseLibrary.ApplyLookupAsync(form, result.ExternalId))
+        {
+            throw new InvalidOperationException("Couldn't load details for that exercise right now.");
+        }
+
+        Notice = $"Filled in details for {result.Name}. Review and save.";
+    }
+
+    private async Task Save()
+    {
+        if (await ExerciseLibrary.SaveAsync(form) is { } error)
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        editing = false;
+        if (IsNew)
+        {
+            Nav.NavigateTo($"exercises/{form.Id}");
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task Delete()
+    {
+        if (await ExerciseLibrary.DeleteAsync(Id) is { } error)
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        Nav.NavigateTo("exercises");
+    }
+
+    private async Task SaveNumbers()
+    {
+        await Stats.SaveUserExerciseAsync(UserId, mine);
+        Notice = "Saved.";
+    }
+
+    private async Task FindVideos()
+    {
+        videoResults = await YouTube.SearchAsync(exercise!.Name);
+        if (videoResults.Count == 0)
+        {
+            Notice = "No videos came back. Try the YouTube search link instead.";
+        }
+    }
+
+    private async Task SaveVideo(VideoResult video)
+    {
+        if (await ExerciseLibrary.AddVideoAsync(Id, video.YouTubeId, video.Title, video.Channel) is { } error)
+        {
+            throw new InvalidOperationException(error);
+        }
+    }
+
+    private async Task SaveVideoUrl()
+    {
+        if (await ExerciseLibrary.AddVideoAsync(Id, videoUrl, null, null) is { } error)
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        videoUrl = "";
+    }
+}

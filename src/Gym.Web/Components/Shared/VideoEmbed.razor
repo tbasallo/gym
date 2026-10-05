@@ -1,0 +1,10 @@
+<div class="video-frame">
+    <iframe src="@YouTubeClient.EmbedUrl(YouTubeId)" title="@Title" loading="lazy"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string YouTubeId { get; set; } = "";
+    [Parameter] public string? Title { get; set; }
+}

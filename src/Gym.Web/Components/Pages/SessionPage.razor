@@ -1,0 +1,428 @@
+@page "/session/{Id:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AppPage
+@implements IAsyncDisposable
+@inject SessionService Sessions
+@inject StatsService Stats
+@inject GroupService Groups
+@inject ExerciseService ExerciseLibrary
+@inject LiveUpdates Live
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject TimeProvider Time
+
+<PageTitle>@(session?.Title ?? "Session") · Gym</PageTitle>
+
+@if (session is null)
+{
+    @if (loaded)
+    {
+        <div class="empty">Session not found. <a href="">Back to today</a></div>
+    }
+}
+else if (session.Status != SessionStatus.Active)
+{
+    <SessionSummary Session="session" Zone="Me" />
+}
+else
+{
+    var current = CurrentExercise;
+    <div class="session-head">
+        <div class="row-between">
+            <div>
+                <h1 class="mb-0" style="font-size: 1.3rem">@session.Title</h1>
+                <div class="muted small">Started @Local(session.StartedUtc, "h:mm tt")</div>
+            </div>
+            <div class="row-gap">
+                <span class="clock" aria-label="Elapsed">@Clock(now - session.StartedUtc)</span>
+                <button class="btn btn-accent" disabled="@Busy" @onclick="() => confirmFinish = true">Finish</button>
+            </div>
+        </div>
+
+        <div class="ex-tabs" role="tablist">
+            @foreach (var ex in session.Exercises)
+            {
+                var doneSets = session.Sets.Count(s => s.SessionExerciseId == ex.Id && !s.IsInProgress);
+                var goal = ex.TargetSets * session.Participants.Count;
+                <button role="tab" class="ex-tab @(ex.Id == current?.Id ? "active" : "") @(doneSets >= goal ? "done" : "")"
+                        aria-selected="@(ex.Id == current?.Id)" @onclick="() => selectedId = ex.Id">
+                    <span class="n">@(doneSets >= goal ? "✓" : ex.Order.ToString())</span>
+                    @ex.Exercise.Name
+                </button>
+            }
+            <button class="ex-tab" @onclick="() => showAdd = !showAdd">＋ Add</button>
+        </div>
+    </div>
+
+    @if (Error is not null)
+    {
+        <div class="alert-x mb-3">@Error</div>
+    }
+
+    @if (confirmFinish)
+    {
+        <div class="card-x mb-3 stack-sm" style="border-color: var(--accent)">
+            <h3 class="mb-0">Finish this session?</h3>
+            <p class="muted mb-0">
+                It will be saved to history and the schedule moves to the next day.
+                @if (session.Sets.Any(s => s.IsInProgress))
+                {
+                    <span>Running set timers are stopped; sets with no reps entered are dropped.</span>
+                }
+            </p>
+            <div class="row-gap">
+                <button class="btn btn-accent" disabled="@Busy" @onclick="() => Run(Finish, reload: false)">Finish session</button>
+                <button class="btn btn-soft" @onclick="() => confirmFinish = false">Keep going</button>
+                <button class="btn btn-link text-danger ms-auto" disabled="@Busy" @onclick="() => Run(Cancel, reload: false)">Discard session</button>
+            </div>
+        </div>
+    }
+
+    @if (showAdd)
+    {
+        <div class="card-x mb-3 stack-sm">
+            <h3 class="mb-0">Add an exercise to this session</h3>
+            <ExercisePicker Exercises="library" OnPick="AddExercise" />
+        </div>
+    }
+
+    @if (current is not null)
+    {
+        var ex = current.Exercise;
+        var video = ex.Videos.FirstOrDefault(v => v.IsPrimary) ?? ex.Videos.FirstOrDefault();
+        <section class="card-x stack-sm" id="current-exercise">
+            <div class="row-between">
+                <div>
+                    <h2 class="mb-0">@ex.Name</h2>
+                    <div class="muted small">
+                        @current.TargetSets sets × @current.TargetReps reps
+                        @if (!string.IsNullOrEmpty(ex.Muscles))
+                        {
+                            <span> · @ex.Muscles</span>
+                        }
+                    </div>
+                </div>
+                <div class="row-gap">
+                    <button class="btn btn-soft btn-sm" @onclick="() => showHelp = !showHelp">@(showHelp ? "Hide help" : video is null ? "How to" : "▶ Video")</button>
+                    <a class="btn btn-soft btn-sm" href="exercises/@ex.Id" target="_blank">Details</a>
+                </div>
+            </div>
+
+            @if (showHelp)
+            {
+                <div class="stack-sm">
+                    @if (video is not null)
+                    {
+                        <VideoEmbed YouTubeId="@video.YouTubeId" Title="@video.Title" />
+                    }
+                    else
+                    {
+                        <div class="muted small">
+                            No saved video yet.
+                            <a href="@YouTubeClient.SearchUrl(ex.Name)" target="_blank" rel="noopener">Search YouTube for "@ex.Name"</a>
+                            or save one on the <a href="exercises/@ex.Id" target="_blank">exercise page</a>.
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(ex.Description))
+                    {
+                        <p class="mb-0" style="white-space: pre-line">@ex.Description</p>
+                    }
+                </div>
+            }
+
+            <div class="people">
+                @for (var i = 0; i < participants.Count; i++)
+                {
+                    var person = participants[i];
+                    var p = plan.GetValueOrDefault((person.Id, current.ExerciseId));
+                    <ParticipantColumn User="person"
+                                       Index="i"
+                                       Exercise="current"
+                                       Sets="session.Sets"
+                                       Plan="p"
+                                       Draft="DraftFor(person, current)"
+                                       Now="now"
+                                       LastCompletedUtc="LastCompleted(person.Id)"
+                                       RestGoalSeconds="RestGoal(person, current)"
+                                       TargetSetsOverride="p?.TargetSets"
+                                       Busy="Busy"
+                                       OnStart="w => Run(() => Sessions.StartSetAsync(session.Id, UserId, current.Id, person.Id, w))"
+                                       OnComplete="a => Run(() => Sessions.CompleteSetAsync(session.Id, UserId, a.SetId, a.Reps, a.Weight))"
+                                       OnLog="a => Run(() => Sessions.LogSetAsync(session.Id, UserId, current.Id, person.Id, a.Reps, a.Weight))"
+                                       OnUpdate="a => Run(() => Sessions.UpdateSetAsync(session.Id, UserId, a.SetId, a.Reps, a.Weight))"
+                                       OnDelete="id => Run(() => Sessions.DeleteSetAsync(session.Id, UserId, id))" />
+                }
+            </div>
+
+            <div class="row-between pt-1">
+                <button class="btn btn-soft" disabled="@(PreviousId is null)" @onclick="() => Go(PreviousId)">← Previous</button>
+                <button class="btn btn-soft" disabled="@(NextId is null)" @onclick="() => Go(NextId)">Next exercise →</button>
+            </div>
+        </section>
+    }
+
+    <details class="mt-3">
+        <summary class="muted">Who's in this session (@participants.Count)</summary>
+        <div class="card-x mt-2">
+            <ul class="list-x">
+                @foreach (var member in teammates)
+                {
+                    var inSession = participants.Any(p => p.Id == member.Id);
+                    <li class="row-between">
+                        <span>@member.Name</span>
+                        @if (inSession)
+                        {
+                            <button class="btn btn-sm btn-soft" disabled="@Busy" @onclick="() => Run(() => Sessions.RemoveParticipantAsync(session.Id, UserId, member.Id))">Remove</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-soft" disabled="@Busy" @onclick="() => Run(() => Sessions.AddParticipantAsync(session.Id, UserId, member.Id))">Add</button>
+                        }
+                    </li>
+                }
+            </ul>
+        </div>
+    </details>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private WorkoutSession? session;
+    private bool loaded;
+    private List<ApplicationUser> participants = [];
+    private List<ApplicationUser> teammates = [];
+    private List<Exercise> library = [];
+    private Dictionary<(string UserId, int ExerciseId), PlannedExercise> plan = [];
+    private readonly Dictionary<(string UserId, int SessionExerciseId), SetDraft> drafts = [];
+    private readonly HashSet<int> buzzedFor = [];
+    private string planKey = "";
+    private int? selectedId;
+    private bool showHelp;
+    private bool showAdd;
+    private bool confirmFinish;
+    private DateTime now;
+    private PeriodicTimer? ticker;
+    private CancellationTokenSource stop = new();
+
+    private SessionExercise? CurrentExercise =>
+        session?.Exercises.FirstOrDefault(e => e.Id == selectedId) ?? FirstUnfinished() ?? session?.Exercises.FirstOrDefault();
+
+    private int? PreviousId => Neighbor(-1);
+    private int? NextId => Neighbor(1);
+
+    protected override async Task OnInitializedAsync()
+    {
+        now = Time.GetUtcNow().UtcDateTime;
+        Live.SessionChanged += OnSessionChanged;
+        await base.OnInitializedAsync();
+    }
+
+    protected override async Task LoadAsync()
+    {
+        session = await Sessions.GetAsync(Id, UserId);
+        loaded = true;
+        if (session is null)
+        {
+            return;
+        }
+
+        participants = session.Participants.Select(p => p.User).OrderBy(u => u.Name).ThenBy(u => u.Id).ToList();
+
+        // Suggestions only change when the line-up changes, not on every set.
+        var key = string.Join(",", participants.Select(p => p.Id)) + "|" + string.Join(",", session.Exercises.Select(e => e.Id));
+        if (key != planKey && session.Status == SessionStatus.Active)
+        {
+            plan = await Stats.GetPlanAsync(session);
+            teammates = session.GroupId is null ? participants : (await Groups.GetGroupsAsync(UserId))
+                .Where(g => g.Id == session.GroupId).SelectMany(g => g.Members.Select(m => m.User)).ToList();
+            planKey = key;
+        }
+
+        // Inputs left empty pick up what was just logged (possibly from another device).
+        foreach (var ((userId, exerciseId), draft) in drafts)
+        {
+            if (draft.Weight == 0 && session.Sets.Where(s => s.UserId == userId && s.SessionExerciseId == exerciseId && s.Weight > 0)
+                    .MaxBy(s => s.SetNumber) is { } latest)
+            {
+                draft.Weight = latest.Weight;
+            }
+        }
+
+        if (library.Count == 0 && session.Status == SessionStatus.Active)
+        {
+            library = await ExerciseLibrary.SearchAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The first render can happen before the session has loaded, so start once it has.
+        if (ticker is null && session?.Status == SessionStatus.Active && RendererInfo.IsInteractive)
+        {
+            ticker = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            _ = TickAsync();
+            await JS.InvokeVoidAsync("gym.keepAwake", true);
+        }
+    }
+
+    private async Task TickAsync()
+    {
+        try
+        {
+            while (await ticker!.WaitForNextTickAsync(stop.Token))
+            {
+                if (session?.Status != SessionStatus.Active)
+                {
+                    // Finished or discarded (maybe on another device): let the screen sleep again.
+                    await InvokeAsync(() => JS.InvokeVoidAsync("gym.keepAwake", false).AsTask());
+                    break;
+                }
+
+                now = Time.GetUtcNow().UtcDateTime;
+                await InvokeAsync(StateHasChanged);
+                await BuzzWhenRested();
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or JSDisconnectedException)
+        {
+        }
+    }
+
+    /// <summary>Vibrates once when someone's rest reaches its goal.</summary>
+    private async Task BuzzWhenRested()
+    {
+        if (session is null || CurrentExercise is not { } current)
+        {
+            return;
+        }
+
+        foreach (var person in participants)
+        {
+            var last = session.Sets.Where(s => s.UserId == person.Id && s.CompletedUtc != null).MaxBy(s => s.CompletedUtc);
+            if (last is null || buzzedFor.Contains(last.Id) || session.Sets.Any(s => s.UserId == person.Id && s.IsInProgress))
+            {
+                continue;
+            }
+
+            var rest = (now - last.CompletedUtc!.Value).TotalSeconds;
+            var goal = RestGoal(person, current);
+            if (rest >= goal && rest < goal + 5)
+            {
+                buzzedFor.Add(last.Id);
+                try
+                {
+                    await InvokeAsync(() => JS.InvokeVoidAsync("gym.buzz").AsTask());
+                }
+                catch (JSDisconnectedException)
+                {
+                }
+            }
+        }
+    }
+
+    private SetDraft DraftFor(ApplicationUser person, SessionExercise exercise)
+    {
+        var key = (person.Id, exercise.Id);
+        if (!drafts.TryGetValue(key, out var draft))
+        {
+            var p = plan.GetValueOrDefault((person.Id, exercise.ExerciseId));
+            var lastHere = session!.Sets.Where(s => s.UserId == person.Id && s.SessionExerciseId == exercise.Id && s.Weight > 0)
+                .MaxBy(s => s.SetNumber);
+            draft = new SetDraft
+            {
+                Weight = lastHere?.Weight ?? p?.Suggestion.Weight ?? p?.WorkingWeight ?? 0,
+                Reps = p?.TargetReps ?? exercise.TargetReps,
+            };
+            drafts[key] = draft;
+        }
+
+        return draft;
+    }
+
+    private DateTime? LastCompleted(string userId) =>
+        session!.Sets.Where(s => s.UserId == userId && s.CompletedUtc != null).Max(s => s.CompletedUtc);
+
+    private static int RestGoal(ApplicationUser person, SessionExercise exercise) =>
+        exercise.RestSeconds ?? (person.DefaultRestSeconds > 0 ? person.DefaultRestSeconds : 90);
+
+    private SessionExercise? FirstUnfinished() =>
+        session?.Exercises.FirstOrDefault(e =>
+            participants.Any(p => session.Sets.Count(s => s.SessionExerciseId == e.Id && s.UserId == p.Id && !s.IsInProgress) < e.TargetSets));
+
+    private int? Neighbor(int delta)
+    {
+        if (session is null || CurrentExercise is not { } current)
+        {
+            return null;
+        }
+
+        var index = session.Exercises.IndexOf(current) + delta;
+        return index >= 0 && index < session.Exercises.Count ? session.Exercises[index].Id : null;
+    }
+
+    private async Task Go(int? id)
+    {
+        selectedId = id;
+        showHelp = false;
+        await JS.InvokeVoidAsync("scrollTo", 0, 0);
+    }
+
+    private Task AddExercise(Exercise exercise) => Run(async () =>
+    {
+        await Sessions.AddExerciseAsync(Id, UserId, exercise.Id, 3, 10);
+        showAdd = false;
+    });
+
+    private async Task Finish()
+    {
+        await Sessions.FinishAsync(Id, UserId);
+        confirmFinish = false;
+        await LoadAsync();
+        await JS.InvokeVoidAsync("gym.keepAwake", false);
+    }
+
+    private async Task Cancel()
+    {
+        await Sessions.CancelAsync(Id, UserId);
+        Nav.NavigateTo("");
+    }
+
+    private void OnSessionChanged(int sessionId)
+    {
+        if (sessionId != Id)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await LoadAsync();
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning(ex, "Live refresh failed");
+            }
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Live.SessionChanged -= OnSessionChanged;
+        await stop.CancelAsync();
+        ticker?.Dispose();
+        stop.Dispose();
+        try
+        {
+            await JS.InvokeVoidAsync("gym.keepAwake", false);
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException or InvalidOperationException)
+        {
+            // Circuit gone or still prerendering.
+        }
+    }
+}

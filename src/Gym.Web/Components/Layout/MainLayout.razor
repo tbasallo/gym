@@ -1,0 +1,46 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Navigation
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <a class="brand" href="">
+            <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 10h2V7h2v10H5v-3H3v-4Zm16 0h2v4h-2v3h-2V7h2v3ZM8 6h2v12H8V6Zm6 0h2v12h-2V6Zm-4 5h4v2h-4v-2Z"/></svg>
+            </span>
+            Gym
+        </a>
+        <AuthorizeView>
+            <Authorized>
+                <nav class="mainnav" aria-label="Main">
+                    <NavLink href="" Match="NavLinkMatch.All">Today</NavLink>
+                    <NavLink href="schedules">Schedules</NavLink>
+                    <NavLink href="exercises">Exercises</NavLink>
+                    <NavLink href="reports">Reports</NavLink>
+                    <NavLink href="group">Group</NavLink>
+                    <NavLink href="settings">Settings</NavLink>
+                </nav>
+                <form action="Account/Logout" method="post" class="logout">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="ReturnUrl" value="" />
+                    <button type="submit" class="btn btn-link btn-sm" title="Sign out @context.User.Identity?.Name">Sign out</button>
+                </form>
+            </Authorized>
+            <NotAuthorized>
+                <nav class="mainnav" aria-label="Account">
+                    <NavLink href="Account/Login">Sign in</NavLink>
+                    <NavLink href="Account/Register">Register</NavLink>
+                </nav>
+            </NotAuthorized>
+        </AuthorizeView>
+    </div>
+</header>
+
+<main class="page-content">
+    @Body
+</main>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Something went wrong.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">✕</span>
+</div>
