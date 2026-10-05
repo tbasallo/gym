@@ -306,13 +306,13 @@ else
                                     <button class="btn btn-sm @(chartMode == key ? "btn-accent" : "btn-soft")" @onclick="() => chartMode = key">@label</button>
                                 }
                             </div>
-                            <MultiTrendChart Series="GroupSeries()" ToLocal="Me.ToLocal" Unit="@Unit"
+                            <MultiTrendChart Series="GroupSeries()" ToLocal="Me.ToLocal" Unit="@ChartUnit(Unit)"
                                              Label="@($"{exercise.Name}: {ChartModes.First(m => m.Key == chartMode).Label} by person")" />
                             <div class="muted small">Filled dots hit every target; hollow dots missed some reps.</div>
                             <div class="table-wrap">
                                 <table class="table-x">
                                     <thead>
-                                        <tr><th>Person</th><th class="text-end">Sessions</th><th>First</th><th>Last</th><th>Range</th><th class="text-end">Current</th><th class="text-end">Est. 1RM</th><th class="text-end">Streak</th><th>Next time</th></tr>
+                                        <tr><th>Person</th><th class="text-end">Sessions</th><th>First</th><th>Last</th><th>Range</th><th class="text-end">Current</th><th class="text-end">Est. 1RM</th><th class="text-end">Streak</th><th>Reps</th><th>Next time</th></tr>
                                     </thead>
                                     <tbody>
                                         @foreach (var m in people)
@@ -330,6 +330,9 @@ else
                                                 <td class="text-end num fw-semibold">@W(ps.Stats.LastTopWeight)</td>
                                                 <td class="text-end num">@W(ps.Stats.BestEstimated1RM)</td>
                                                 <td class="text-end num">@ps.Stats.TargetStreak</td>
+                                                <td class="text-nowrap" title="Average reps per set at @W(ps.Stats.Reps.Weight): @(ps.Stats.Reps.FromAvg?.ToString("0.#") ?? "—") → @(ps.Stats.Reps.ToAvg?.ToString("0.#") ?? "—")">
+                                                    @RepTrendBadge.Arrow(ps.Stats.Reps.Direction) @(ps.Stats.Reps.ToAvg?.ToString("0.#"))
+                                                </td>
                                                 <td class="text-nowrap" title="@ps.Suggestion.Reason">
                                                     @(ps.Suggestion.Kind switch { SuggestionKind.Increase => "↑ ", SuggestionKind.Deload => "↓ ", _ => "= " })@W(ps.Suggestion.Weight)
                                                 </td>
@@ -364,9 +367,15 @@ else
                                 <button class="btn btn-sm @(chartMode == key ? "btn-accent" : "btn-soft")" @onclick="() => chartMode = key">@label</button>
                             }
                         </div>
-                        <TrendChart Points="st.Trend" Value="ChartValue" ToLocal="Me.ToLocal" Unit="@unit"
+                        <TrendChart Points="st.Trend" Value="ChartValue" ToLocal="Me.ToLocal" Unit="@ChartUnit(unit)"
                                     Label="@ChartModes.First(m => m.Key == chartMode).Label" />
                         <div class="muted small">Filled dots hit every target; hollow dots missed some reps.</div>
+
+                        <div class="row-between mt-2">
+                            <h3 class="mb-0">Reps per set</h3>
+                            <RepTrendBadge Trend="st.Reps" Unit="@unit" />
+                        </div>
+                        <RepBarsChart Points="st.Trend" Slot="PersonSlot(statsUserId)" ToLocal="Me.ToLocal" Unit="@unit" />
                     }
 
                     <details>
@@ -427,7 +436,7 @@ else
     [SupplyParameterFromQuery(Name = "group")] public int? QueryGroup { get; set; }
 
     private static readonly (string Key, string Label)[] ChartModes =
-        [("top", "Top weight"), ("e1rm", "Est. 1RM")];
+        [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("reps", "Avg reps")];
 
     private Exercise? exercise;
     private Exercise form = new();
@@ -454,8 +463,26 @@ else
     private Func<TrendPoint, decimal> ChartValue => chartMode switch
     {
         "e1rm" => p => p.Estimated1RM,
+        "reps" => p => p.AvgReps,
         _ => p => p.TopWeight,
     };
+
+    private string ChartUnit(string weightUnit) => chartMode == "reps" ? "reps" : weightUnit;
+
+    /// <summary>The person's color: their place in their (first) group, as on every other screen.</summary>
+    private int PersonSlot(string userId)
+    {
+        foreach (var g in groups)
+        {
+            var index = GroupService.Ordered(g.Members.Select(m => m.User)).ToList().FindIndex(u => u.Id == userId);
+            if (index >= 0)
+            {
+                return index % 4;
+            }
+        }
+
+        return 0;
+    }
 
     protected override async Task LoadAsync()
     {

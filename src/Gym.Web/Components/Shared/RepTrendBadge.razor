@@ -1,0 +1,47 @@
+@* Plain-language rep trend at the current weight. *@
+
+@if (Trend.Weight > 0)
+{
+    <span class="rep-trend pill @Css" title="Average reps per set, comparing sessions at the same weight">
+        @switch (Trend.Direction)
+        {
+            case RepDirection.Up:
+                <span>↑ Reps climbing at @W: @Avg(Trend.FromAvg) → @Avg(Trend.ToAvg) per set</span>
+                break;
+            case RepDirection.Down:
+                <span>↓ Reps dropping at @W: @Avg(Trend.FromAvg) → @Avg(Trend.ToAvg) per set</span>
+                break;
+            case RepDirection.Steady:
+                <span>→ Reps steady at @W: about @Avg(Trend.ToAvg) per set</span>
+                break;
+            default:
+                <span>First session at @W, @Avg(Trend.ToAvg) reps per set. Trend shows after the next one.</span>
+                break;
+        }
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public RepTrend Trend { get; set; } = RepTrend.Unknown;
+    [Parameter] public string Unit { get; set; } = "lb";
+
+    private string W => $"{Trend.Weight:0.##} {Unit}";
+
+    private string Css => Trend.Direction switch
+    {
+        RepDirection.Up => "pill-good",
+        RepDirection.Down => "pill-warn",
+        _ => "",
+    };
+
+    private static string Avg(decimal? v) => v?.ToString("0.#") ?? "—";
+
+    /// <summary>Short arrow for tables.</summary>
+    public static string Arrow(RepDirection d) => d switch
+    {
+        RepDirection.Up => "↑",
+        RepDirection.Down => "↓",
+        RepDirection.Steady => "→",
+        _ => "·",
+    };
+}

@@ -47,7 +47,7 @@
                 <button class="btn btn-sm @(metric == key ? "btn-accent" : "btn-soft")" @onclick="() => metric = key">@label</button>
             }
         </div>
-        <MultiTrendChart Series="SeriesFor(exercise.Id, charted)" ToLocal="Zone.ToLocal" Unit="@Unit"
+        <MultiTrendChart Series="SeriesFor(exercise.Id, charted)" ToLocal="Zone.ToLocal" Unit="@(metric == "reps" ? "reps" : Unit)"
                          Label="@($"{exercise.Name}: {Metrics.First(m => m.Key == metric).Label} by person")" />
         <div class="small"><a href="exercises/@exercise.Id?group=@Progress.Group.Id">Open @exercise.Name for everyone →</a></div>
     }
@@ -108,7 +108,7 @@
 
 @code {
     private static readonly (string Key, string Label)[] Metrics =
-        [("top", "Top weight"), ("e1rm", "Est. 1RM")];
+        [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("reps", "Avg reps")];
 
     [Parameter, EditorRequired] public GroupProgress Progress { get; set; } = null!;
     [Parameter, EditorRequired] public UserContext Zone { get; set; } = null!;
@@ -142,6 +142,7 @@
     private decimal Value(TrendPoint t) => metric switch
     {
         "e1rm" => t.Estimated1RM,
+        "reps" => t.AvgReps,
         _ => t.TopWeight,
     };
 

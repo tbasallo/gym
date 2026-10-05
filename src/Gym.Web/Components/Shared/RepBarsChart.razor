@@ -1,0 +1,109 @@
+@* Reps for every set, grouped by session. Dashed line = target reps; hollow bars fell short; faded bars were lighter back-off sets. *@
+
+@if (shown.Count == 0)
+{
+    <div class="empty">No history yet.</div>
+}
+else
+{
+    <div class="legend mb-1 s@(Slot)" aria-hidden="true">
+        <span class="key"><span class="sw"></span>Hit target reps</span>
+        <span class="key"><span class="sw hollow"></span>Fewer reps</span>
+        <span class="key"><span class="sw faded"></span>Lighter set</span>
+        <span class="key"><span class="sw dash"></span>Target reps</span>
+    </div>
+    <svg class="chart s@(Slot)" viewBox="0 0 @W @H" role="img" aria-label="Reps per set for each session">
+        <g class="grid">
+            @foreach (var tick in ticks)
+            {
+                <line x1="@Pad.L" x2="@(W - Pad.R)" y1="@F(Y(tick))" y2="@F(Y(tick))" />
+            }
+        </g>
+        <g class="axis">
+            @foreach (var tick in ticks)
+            {
+                @Text(Pad.L - 6, Y(tick) + 4, "end", tick.ToString())
+            }
+            @Text(Pad.L, H - 4, "start", Format(shown[0].DateUtc))
+            @if (shown.Count > 1)
+            {
+                @Text(W - Pad.R, H - 4, "end", Format(shown[^1].DateUtc))
+            }
+        </g>
+        @for (var i = 0; i < shown.Count; i++)
+        {
+            var session = shown[i];
+            var left = Pad.L + i * slot + slot * 0.1;
+            var width = slot * 0.8;
+            var barWidth = Math.Max(3, (width - (session.Sets.Count - 1) * 2) / session.Sets.Count);
+            var weightChanged = i == 0 || session.TopWeight != shown[i - 1].TopWeight;
+            <g>
+                @for (var s = 0; s < session.Sets.Count; s++)
+                {
+                    var set = session.Sets[s];
+                    var hit = set.Reps >= session.TargetReps;
+                    var lighter = set.Weight < session.TopWeight;
+                    var x = left + s * (barWidth + 2);
+                    var y = Y(set.Reps);
+                    <g class="rep">
+                        <title>@Format(session.DateUtc) · Set @(s + 1): @set.Reps reps × @set.Weight.ToString("0.##") @Unit (target @session.TargetReps)</title>
+                        <rect class="rbar @(hit ? "" : "miss") @(lighter ? "lighter" : "")" x="@F(x)" y="@F(y)" width="@F(barWidth)" height="@F(Math.Max(1, Y(0) - y))" rx="2" />
+                    </g>
+                }
+                <line class="target" x1="@F(left - 2)" x2="@F(left + width + 2)" y1="@F(Y(session.TargetReps))" y2="@F(Y(session.TargetReps))" />
+                @Weight(left + width / 2, Y(0) + 15, session.TopWeight.ToString("0.##"), weightChanged)
+            </g>
+        }
+    </svg>
+    <div class="muted small">
+        Top weight under each session (bold when it changed).
+        @if (Points.Count > shown.Count)
+        {
+            <span>Showing the last @shown.Count of @Points.Count sessions.</span>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<TrendPoint> Points { get; set; } = [];
+    [Parameter] public int Slot { get; set; }
+    [Parameter] public Func<DateTime, DateTime> ToLocal { get; set; } = d => d;
+    [Parameter] public string Unit { get; set; } = "lb";
+    [Parameter] public int MaxSessions { get; set; } = 12;
+
+    private const int W = 640;
+    private const int H = 230;
+    private static readonly (int L, int R, int T, int B) Pad = (58, 8, 14, 50);
+    private List<TrendPoint> shown = [];
+    private List<int> ticks = [];
+    private int max;
+    private double slot;
+
+    protected override void OnParametersSet()
+    {
+        shown = Points.Where(p => p.Sets.Count > 0).TakeLast(MaxSessions).ToList();
+        if (shown.Count == 0)
+        {
+            return;
+        }
+
+        var hi = Math.Max(shown.Max(p => p.Sets.Max(s => s.Reps)), shown.Max(p => p.TargetReps));
+        var step = hi <= 12 ? 2 : hi <= 30 ? 5 : 10;
+        max = (int)Math.Ceiling((hi + 1) / (double)step) * step;
+        ticks = Enumerable.Range(0, max / step + 1).Select(i => i * step).ToList();
+        slot = (W - Pad.L - Pad.R) / (double)shown.Count;
+    }
+
+    private double Y(int reps) => Pad.T + (max - reps) / (double)max * (H - Pad.T - Pad.B);
+
+    private static string F(double d) => d.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    // Razor reserves <text>, so SVG text elements are emitted as markup.
+    private static MarkupString Text(double x, double y, string anchor, string content) =>
+        new($"<text x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\">{System.Net.WebUtility.HtmlEncode(content)}</text>");
+
+    private static MarkupString Weight(double x, double y, string content, bool changed) =>
+        new($"<text class=\"wlabel{(changed ? " changed" : "")}\" x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"middle\">{System.Net.WebUtility.HtmlEncode(content)}</text>");
+
+    private string Format(DateTime utc) => ToLocal(utc).ToString("MMM d");
+}

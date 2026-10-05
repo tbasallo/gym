@@ -124,6 +124,52 @@ public class ProgressionTests
     }
 
     [Fact]
+    public void Reps_climbing_at_the_same_weight_trend_up()
+    {
+        var trend = ExerciseStats.From([Session(9, 100, 6, 6, 6), Session(5, 100, 7, 7, 6), Session(1, 100, 8, 8, 7)]).Reps;
+        Assert.Equal(RepDirection.Up, trend.Direction);
+        Assert.Equal(100m, trend.Weight);
+        Assert.Equal(6m, trend.FromAvg);
+        Assert.Equal(7.7m, trend.ToAvg);
+        Assert.Equal(3, trend.Sessions);
+    }
+
+    [Fact]
+    public void Reps_dropping_trend_down_and_small_changes_are_steady()
+    {
+        Assert.Equal(RepDirection.Down, ExerciseStats.From([Session(5, 100, 8, 8, 8), Session(1, 100, 8, 6, 6)]).Reps.Direction);
+        Assert.Equal(RepDirection.Steady, ExerciseStats.From([Session(5, 100, 8, 8, 8), Session(1, 100, 8, 8, 7)]).Reps.Direction);
+    }
+
+    [Fact]
+    public void Rep_trend_only_compares_sessions_at_the_current_weight()
+    {
+        // Reps fell because the weight went up; that is not a decline.
+        var trend = ExerciseStats.From([Session(9, 100, 10, 10, 10), Session(1, 110, 6, 6, 6)]).Reps;
+        Assert.Equal(RepDirection.Unknown, trend.Direction);
+        Assert.Equal(110m, trend.Weight);
+        Assert.Equal(6m, trend.ToAvg);
+    }
+
+    [Fact]
+    public void Trend_points_keep_every_set_and_average_reps()
+    {
+        var point = ExerciseStats.From([Session(1, 100, 8, 7, 6)]).Trend.Single();
+        Assert.Equal([8, 7, 6], point.Sets.Select(s => s.Reps));
+        Assert.Equal(8, point.TargetReps);
+        Assert.Equal(7m, point.AvgReps);
+    }
+
+    [Fact]
+    public void Lighter_back_off_sets_are_left_out_of_rep_averages()
+    {
+        var withBackOff = new SessionPerformance(Today, 3, 8, [new(6, 135), new(12, 95), new(12, 95)]);
+        var stats = ExerciseStats.From([Session(5, 135, 6, 6, 6), withBackOff]);
+        Assert.Equal(6m, stats.Trend[^1].AvgReps);
+        Assert.Equal(RepDirection.Steady, stats.Reps.Direction);
+    }
+
+    [Fact]
     public void Stats_of_nothing_are_empty()
     {
         Assert.Same(ExerciseStats.Empty, ExerciseStats.From([]));

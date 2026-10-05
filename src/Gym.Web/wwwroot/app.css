@@ -493,10 +493,23 @@ a { color: var(--accent); }
 .legend .sw { width: 12px; height: 12px; border-radius: 3px; background: var(--sc); flex: none; }
 .legend .sw.line { height: 3px; border-radius: 2px; width: 16px; }
 
+/* ---------- Reps per set ---------- */
+.chart .rbar { fill: var(--sc, var(--chart-line)); }
+.chart .rbar.miss { fill: var(--surface); stroke: var(--sc, var(--chart-line)); stroke-width: 2; }
+.chart .rbar.lighter { opacity: .4; }
+.chart g.rep:hover .rbar { filter: brightness(1.12); }
+.chart .target { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .7; vector-effect: non-scaling-stroke; }
+.chart .wlabel { fill: var(--muted); font-size: 11px; }
+.chart .wlabel.changed { fill: var(--text); font-weight: 700; }
+.legend .sw.hollow { background: transparent; border: 2px solid var(--sc); }
+.legend .sw.faded { opacity: .4; }
+.legend .sw.dash { background: none; height: 0; border-top: 2px dashed var(--text); opacity: .7; width: 16px; border-radius: 0; }
+.rep-trend { display: inline-flex; align-items: center; gap: 6px; }
+
 /* Charts are drawn 640 units wide and scaled to fit; keep strokes crisp and text legible on phones. */
 .chart .line, .chart .sline, .chart .grid line { vector-effect: non-scaling-stroke; }
 @media (max-width: 640px) {
-    .chart .axis text, .chart .slabel { font-size: 19px; }
+    .chart .axis text, .chart .slabel, .chart .wlabel { font-size: 19px; }
     .chart .pt, .chart .spt { r: 7px; stroke-width: 3; }
     .chart .line, .chart .sline { stroke-width: 2.5; }
 }

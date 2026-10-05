@@ -72,6 +72,7 @@
                             <th class="text-end">Current</th>
                             <th class="text-end">Est. 1RM</th>
                             <th class="text-end" title="Sessions in a row hitting every target">Streak</th>
+                            <th title="Average reps per set at the current weight">Reps</th>
                             <th>Next time</th>
                         </tr>
                     </thead>
@@ -88,6 +89,7 @@
                                 <td class="text-end num fw-semibold">@W(st.LastTopWeight)</td>
                                 <td class="text-end num">@W(st.BestEstimated1RM)</td>
                                 <td class="text-end num">@st.TargetStreak</td>
+                                <td class="text-nowrap num" title="Avg reps per set at @W(st.Reps.Weight): @(st.Reps.FromAvg?.ToString("0.#") ?? "—") → @(st.Reps.ToAvg?.ToString("0.#") ?? "—")">@RepTrendBadge.Arrow(st.Reps.Direction) @(st.Reps.ToAvg?.ToString("0.#"))</td>
                                 <td class="text-nowrap" title="@s.Suggestion.Reason">
                                     @switch (s.Suggestion.Kind)
                                     {
