@@ -19,7 +19,7 @@ A small web app for tracking family gym sessions. It is built for two or more pe
 | Data | Azure SQL / SQL Server via EF Core (migrations applied on startup) |
 | Secrets | Azure Key Vault, read with the App Service managed identity |
 | Hosting | Azure App Service (Linux) |
-| CI/CD | GitHub Actions with OpenID Connect login (`.github/workflows/deploy.yml`) |
+| CI/CD | GitHub Actions, deploying with an App Service publish profile (`.github/workflows/deploy.yml`) |
 
 Live sync uses Blazor Server's SignalR connection and an in-process notifier (`Services/LiveUpdates.cs`). That is right for a single App Service instance. Scaling out to several instances would need Azure SignalR Service.
 
@@ -50,28 +50,35 @@ The vault URL is set in `src/Gym.Web/appsettings.json` (`KeyVault:Uri`). You can
 
 Allow the App Service to reach the SQL server, either through the SQL firewall ("Allow Azure services") or a VNet. On first start the app creates its tables and seeds a starter exercise library. No manual SQL is needed.
 
-### 4. GitHub → Azure (OIDC)
+### 4. App Service settings (once)
 
-1. Create an Entra app registration, or a user-assigned managed identity.
-2. Add a **federated credential** for this repo: entity type `Environment`, environment `production`. The subject is `repo:tbasallo/gym:environment:production`.
-3. Give it **Contributor** on the web app's resource group. Contributor on just the web app works if you skip the configure step.
+Blazor Server keeps a live connection open, so in the App Service go to **Configuration → General settings** and set:
 
-Then in the GitHub repo settings, add the following.
+- **Stack:** .NET, version **.NET 10**
+- **Web sockets:** On
+- **Session affinity (ARR affinity):** On
+- **Always on:** On
+- **HTTPS only:** On (under **Settings → Configuration** or **TLS/SSL settings**)
+- Optional: **Health check** path `/healthz`
 
-**Secrets:**
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
+### 5. GitHub deployment (publish profile)
 
-These are identifiers, not passwords.
+1. App Service → **Configuration → General settings**: turn **SCM Basic Auth Publishing Credentials** on. Publish profiles don't work without it, and it is off by default on new apps.
+2. App Service → **Overview** → **Download publish profile**.
+3. GitHub repo → **Settings → Secrets and variables → Actions**:
+   - **Secret** `AZURE_WEBAPP_PUBLISH_PROFILE`: paste the entire contents of the downloaded `.PublishSettings` file.
+   - **Variable** `AZURE_WEBAPP_NAME`: the App Service name.
+4. Optional: create an environment named `production` (**Settings → Environments**) to add required reviewers before each deploy. The secret can live there instead of at repository level.
 
-**Variables:**
-- `AZURE_WEBAPP_NAME`: the App Service name.
-- `AZURE_RESOURCE_GROUP` (optional): when set, each deploy also applies the App Service settings Blazor Server needs: WebSockets on, ARR affinity on, .NET 10 runtime, Always On, HTTPS only and a `/healthz` health check. If you leave it unset, set those once by hand.
+The workflow (`.github/workflows/deploy.yml`):
 
-**Environment:** create one named `production`. You can add required reviewers to it.
+| Trigger | Build + test | Deploy |
+|---|---|---|
+| Pull request to `main` | yes | no |
+| Push to `main` | yes | yes, if `AZURE_WEBAPP_NAME` is set |
+| Manual run (**Actions → Build and deploy → Run workflow**) on `main` | yes | yes, if "deploy" is ticked and `AZURE_WEBAPP_NAME` is set |
 
-Pushing to `main` builds, runs the tests, publishes and deploys. Pull requests run build and tests only.
+If the variable is missing, the deploy job is skipped. If the variable is set but the secret is missing, the deploy job fails with a message saying what to add. If you reset the publish profile in Azure, download it again and update the secret.
 
 ## Running locally
 
