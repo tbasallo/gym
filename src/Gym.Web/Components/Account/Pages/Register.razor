@@ -15,10 +15,17 @@
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
 @inject Gym.Web.Services.RegistrationPolicy Policy
+@inject Gym.Web.Services.PlaceholderService Placeholders
 
 <PageTitle>Register</PageTitle>
 
 <h1>Register</h1>
+
+@if (Claim is not null && claimUser is null)
+{
+    <p class="muted">This invite link is invalid, already used or expired. Ask someone in your group for a new one.</p>
+    return;
+}
 
 @if (!isOpen)
 {
@@ -31,7 +38,15 @@
         <StatusMessage Message="@Message" />
         <EditForm Model="Input" method="post" OnValidSubmit="RegisterUser" FormName="register">
             <DataAnnotationsValidator />
-            <h2>Create a new account.</h2>
+            @if (claimUser is not null)
+            {
+                <h2>Set up your account</h2>
+                <p class="muted">Your workout history so far comes with you.</p>
+            }
+            else
+            {
+                <h2>Create a new account.</h2>
+            }
             <hr />
             <ValidationSummary class="text-danger" role="alert" />
             <div class="form-floating mb-3">
@@ -68,6 +83,15 @@
     [SupplyParameterFromQuery]
     private string? ReturnUrl { get; set; }
 
+    /// <summary>Invite link for someone added without an account: their user id and one-time code.</summary>
+    [SupplyParameterFromQuery]
+    private string? Claim { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? Code { get; set; }
+
+    private ApplicationUser? claimUser;
+
     private bool isOpen = true;
 
     private string? Message => identityErrors is null ? null : $"Error: {string.Join(", ", identityErrors.Select(error => error.Description))}";
@@ -75,11 +99,29 @@
     protected override async Task OnInitializedAsync()
     {
         Input ??= new();
+        if (Claim is not null)
+        {
+            claimUser = await Placeholders.FindClaimableAsync(Claim, Code);
+            if (claimUser is not null && string.IsNullOrEmpty(Input.DisplayName))
+            {
+                Input.DisplayName = claimUser.DisplayName;
+            }
+
+            isOpen = claimUser is not null;
+            return;
+        }
+
         isOpen = await Policy.IsOpenAsync();
     }
 
     public async Task RegisterUser(EditContext editContext)
     {
+        if (claimUser is not null)
+        {
+            await ClaimAccount();
+            return;
+        }
+
         if (!await Policy.CanRegisterAsync(Input.Email))
         {
             identityErrors = [new IdentityError { Description = "This email isn't on the allowed list." }];
@@ -122,6 +164,22 @@
             await SignInManager.SignInAsync(user, isPersistent: false);
             RedirectManager.RedirectTo(ReturnUrl);
         }
+    }
+
+    /// <summary>Upgrades the invited placeholder in place, so its id and history are kept.</summary>
+    private async Task ClaimAccount()
+    {
+        var (result, user) = await Placeholders.ClaimAsync(
+            UserManager, UserStore, claimUser!.Id, Code!, Input.DisplayName, Input.Email, Input.Password);
+        if (!result.Succeeded)
+        {
+            identityErrors = result.Errors;
+            return;
+        }
+
+        Logger.LogInformation("Placeholder {UserId} claimed an account.", user!.Id);
+        await SignInManager.SignInAsync(user, isPersistent: false);
+        RedirectManager.RedirectTo(ReturnUrl);
     }
 
     private ApplicationUser CreateUser()

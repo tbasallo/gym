@@ -19,5 +19,17 @@ public class ApplicationUser : IdentityUser
     [MaxLength(64)]
     public string? TimeZoneId { get; set; }
 
+    /// <summary>
+    /// A person added to a group without an account (no email or password, can't sign in).
+    /// Their Id is a GUID like any user's, so history carries over when they claim it.
+    /// </summary>
+    public bool IsPlaceholder { get; set; }
+
+    /// <summary>SHA-256 of the one-time code in a placeholder's invite link.</summary>
+    [MaxLength(64)]
+    public string? ClaimCodeHash { get; set; }
+
+    public DateTime? ClaimCodeExpiresUtc { get; set; }
+
     public string Name => string.IsNullOrWhiteSpace(DisplayName) ? (UserName ?? Email ?? "?") : DisplayName;
 }

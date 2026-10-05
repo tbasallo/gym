@@ -41,6 +41,10 @@ window.gym = (function () {
             }
         },
 
+        copy: async (text) => {
+            try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+        },
+
         buzz: () => {
             try { if (navigator.vibrate) { navigator.vibrate([200, 100, 200]); } } catch { }
         },

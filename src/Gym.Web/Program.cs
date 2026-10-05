@@ -51,6 +51,7 @@ builder.Services.AddSingleton<LiveUpdates>();
 builder.Services.AddScoped<UserContext>();
 builder.Services.AddScoped<RegistrationPolicy>();
 builder.Services.AddScoped<GroupService>();
+builder.Services.AddScoped<PlaceholderService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<SessionService>();
 builder.Services.AddScoped<StatsService>();

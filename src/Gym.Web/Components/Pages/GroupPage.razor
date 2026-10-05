@@ -3,6 +3,9 @@
 @rendermode InteractiveServer
 @inherits AppPage
 @inject GroupService Groups
+@inject PlaceholderService Placeholders
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>Group · Gym</PageTitle>
 
@@ -10,7 +13,8 @@
     <h1>Group</h1>
     <p class="muted">
         People in a group share schedules and work out in the same session. Any device signed in to the group
-        can log sets for everyone in that session.
+        can log sets for everyone in that session. People without an account (kids, guests) can be added by name;
+        send them an invite link later and their history comes with them.
     </p>
 
     @if (Error is not null)
@@ -42,23 +46,76 @@
             <ul class="list-x">
                 @foreach (var m in g.Members.OrderBy(m => m.User.Name))
                 {
-                    <li class="row-between">
-                        <div>
-                            <div class="fw-semibold">@m.User.Name @(m.UserId == UserId ? "(you)" : "")</div>
-                            <div class="muted small">@m.User.Email</div>
+                    var person = m.User;
+                    <li class="stack-sm">
+                        <div class="row-between">
+                            <div>
+                                @if (renamingPersonId == person.Id)
+                                {
+                                    <div class="row-gap">
+                                        <input class="form-control form-control-sm" style="max-width: 220px" @bind="personNameDraft" />
+                                        <button class="btn btn-accent btn-sm" @onclick="() => Run(async () => { await Placeholders.RenameAsync(g.Id, UserId, person.Id, personNameDraft); renamingPersonId = null; })">Save</button>
+                                        <button class="btn btn-soft btn-sm" @onclick="() => renamingPersonId = null">Cancel</button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="fw-semibold">
+                                        @person.Name @(m.UserId == UserId ? "(you)" : "")
+                                        @if (person.IsPlaceholder)
+                                        {
+                                            <span class="pill ms-1">No account</span>
+                                        }
+                                    </div>
+                                }
+                                @if (person.IsPlaceholder)
+                                {
+                                    <div class="muted small num" title="Permanent id; kept when they claim an account">ID @person.Id</div>
+                                }
+                                else
+                                {
+                                    <div class="muted small">@person.Email</div>
+                                }
+                            </div>
+                            <div class="row-gap">
+                                @if (person.IsPlaceholder && renamingPersonId != person.Id)
+                                {
+                                    <button class="btn btn-sm btn-soft" @onclick="() => { renamingPersonId = person.Id; personNameDraft = person.DisplayName; }">Rename</button>
+                                    <button class="btn btn-sm btn-soft" disabled="@Busy" @onclick="() => Run(() => CreateInvite(g.Id, person.Id), reload: false)">Invite link</button>
+                                }
+                                @if (m.UserId != UserId)
+                                {
+                                    <button class="btn btn-sm btn-link text-danger" @onclick="() => Run(() => Groups.RemoveMemberAsync(g.Id, UserId, m.UserId))">Remove</button>
+                                }
+                            </div>
                         </div>
-                        @if (m.UserId != UserId)
+                        @if (inviteFor == person.Id && inviteLink is not null)
                         {
-                            <button class="btn btn-sm btn-link text-danger" @onclick="() => Run(() => Groups.RemoveMemberAsync(g.Id, UserId, m.UserId))">Remove</button>
+                            <div class="card-x" style="background: var(--surface-2); padding: 10px">
+                                <label class="form-label" for="invite-@person.Id">Send this to @person.Name. It works once and expires in @PlaceholderService.InviteLifetime.Days days.</label>
+                                <div class="row-gap">
+                                    <input id="invite-@person.Id" class="form-control form-control-sm" style="flex: 1; min-width: 200px" readonly value="@inviteLink" />
+                                    <button class="btn btn-sm btn-accent" @onclick="CopyInvite">@(copied ? "Copied" : "Copy")</button>
+                                </div>
+                            </div>
                         }
                     </li>
                 }
             </ul>
-            <div>
-                <label class="form-label">Add someone (they must register first)</label>
-                <div class="row-gap">
-                    <input class="form-control" style="max-width: 320px" type="email" placeholder="email@example.com" @bind="Invite(g.Id).Email" />
-                    <button class="btn btn-soft" disabled="@Busy" @onclick="() => Run(() => Add(g.Id))">Add</button>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Add someone with an account</label>
+                    <div class="row-gap">
+                        <input class="form-control" style="flex: 1; min-width: 180px" type="email" placeholder="email@example.com" @bind="Invite(g.Id).Email" />
+                        <button class="btn btn-soft" disabled="@Busy" @onclick="() => Run(() => Add(g.Id))">Add</button>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Add someone without an account</label>
+                    <div class="row-gap">
+                        <input class="form-control" style="flex: 1; min-width: 180px" placeholder="Name" maxlength="50" @bind="Invite(g.Id).Name" @bind:event="oninput" />
+                        <button class="btn btn-soft" disabled="@(Busy || string.IsNullOrWhiteSpace(Invite(g.Id).Name))" @onclick="() => Run(() => AddPlaceholder(g.Id))">Add</button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -77,6 +134,7 @@
     private sealed class InviteDraft
     {
         public string Email { get; set; } = "";
+        public string Name { get; set; } = "";
     }
 
     private List<WorkoutGroup> groups = [];
@@ -84,6 +142,11 @@
     private int? renamingId;
     private string nameDraft = "";
     private string newName = "";
+    private string? renamingPersonId;
+    private string personNameDraft = "";
+    private string? inviteFor;
+    private string? inviteLink;
+    private bool copied;
 
     protected override async Task LoadAsync() => groups = await Groups.GetGroupsAsync(UserId);
 
@@ -95,6 +158,27 @@
         }
 
         return draft;
+    }
+
+    private async Task AddPlaceholder(int groupId)
+    {
+        var draft = Invite(groupId);
+        var person = await Placeholders.AddAsync(groupId, UserId, draft.Name);
+        Notice = $"Added {person.Name}. They can join sessions now; create an invite link whenever they want their own login.";
+        draft.Name = "";
+    }
+
+    private async Task CreateInvite(int groupId, string personId)
+    {
+        var relative = await Placeholders.CreateInviteLinkAsync(groupId, UserId, personId);
+        inviteFor = personId;
+        inviteLink = Nav.ToAbsoluteUri(relative).AbsoluteUri;
+        copied = false;
+    }
+
+    private async Task CopyInvite()
+    {
+        copied = inviteLink is not null && await JS.InvokeAsync<bool>("gym.copy", inviteLink);
     }
 
     private async Task Add(int groupId)
