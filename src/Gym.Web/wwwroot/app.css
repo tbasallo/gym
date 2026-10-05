@@ -19,7 +19,7 @@
     --p1: #2563eb;
     --p2: #c2410c;
     --p3: #7c3aed;
-    --p4: #0f766e;
+    --p4: #0d9488;
     --chart-line: #0d6e6e;
     --chart-grid: #e5e8ee;
     --radius: 14px;
@@ -48,10 +48,10 @@
     --warn-soft: #3a2e0d;
     --bad: #f87171;
     --bad-soft: #3b1515;
-    --p1: #60a5fa;
-    --p2: #fb923c;
-    --p3: #a78bfa;
-    --p4: #2dd4bf;
+    --p1: #3b82f6;
+    --p2: #ea580c;
+    --p3: #8b5cf6;
+    --p4: #0d9488;
     --chart-line: #2dd4bf;
     --chart-grid: #26324a;
     --shadow: none;
@@ -476,4 +476,29 @@ a { color: var(--accent); }
 
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
+}
+
+/* ---------- Multi-person charts (colors follow the person, validated palette) ---------- */
+.s0 { --sc: var(--p1); }
+.s1 { --sc: var(--p2); }
+.s2 { --sc: var(--p3); }
+.s3 { --sc: var(--p4); }
+.chart .sline { fill: none; stroke: var(--sc); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .spt { fill: var(--sc); stroke: var(--surface); stroke-width: 2; }
+.chart .spt.miss { fill: var(--surface); stroke: var(--sc); }
+.chart .sbar { fill: var(--sc); stroke: var(--surface); stroke-width: 2; }
+.chart .slabel { fill: var(--text); font-size: 11px; font-weight: 600; }
+.chart g.p:hover .spt { r: 6; }
+.chart g.bar:hover .sbar { filter: brightness(1.1); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .85rem; color: var(--text); }
+.legend .key { display: inline-flex; align-items: center; gap: 6px; }
+.legend .sw { width: 12px; height: 12px; border-radius: 3px; background: var(--sc); flex: none; }
+.legend .sw.line { height: 3px; border-radius: 2px; width: 16px; }
+
+/* Charts are drawn 640 units wide and scaled to fit; keep strokes crisp and text legible on phones. */
+.chart .line, .chart .sline, .chart .grid line { vector-effect: non-scaling-stroke; }
+@media (max-width: 640px) {
+    .chart .axis text, .chart .slabel { font-size: 19px; }
+    .chart .pt, .chart .spt { r: 7px; stroke-width: 3; }
+    .chart .line, .chart .sline { stroke-width: 2.5; }
 }

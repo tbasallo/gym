@@ -1,0 +1,161 @@
+@* Everyone in a group together: combined volume, per-exercise trend lines and a side-by-side table. *@
+
+@{
+    var charted = Progress.Members.Where(m => Progress.Slot(m.Id) is not null).ToList();
+    var now = DateTime.UtcNow;
+    var recent = Progress.Sessions.Where(s => s.DateUtc >= now.AddDays(-30)).ToList();
+    var exercise = Progress.Exercises.FirstOrDefault(e => e.Id == exerciseId);
+}
+
+<div class="tiles">
+    <div class="tile"><div class="label">Group sessions</div><div class="value">@Progress.Sessions.Count</div><div class="sub">all time</div></div>
+    <div class="tile"><div class="label">Last 30 days</div><div class="value">@recent.Count</div><div class="sub">@recent.Count(s => s.DateUtc >= now.AddDays(-7)) this week</div></div>
+    <div class="tile"><div class="label">Lifted together</div><div class="value">@Short(recent.Sum(s => s.Total))</div><div class="sub">@Unit, last 30 days</div></div>
+    <div class="tile"><div class="label">People</div><div class="value">@Progress.Members.Count</div><div class="sub">in @Progress.Group.Name</div></div>
+</div>
+
+@if (Progress.MixedUnits)
+{
+    <div class="alert-x" style="background: var(--warn-soft); color: var(--warn)">People in this group log in different units (lb and kg). Weights are shown as logged.</div>
+}
+@if (Progress.Members.Count > GroupProgress.MaxCharted)
+{
+    <div class="muted small">Charts show the first @GroupProgress.MaxCharted people; the table below includes everyone.</div>
+}
+
+<section class="card-x stack-sm">
+    <div>
+        <h2 class="mb-0">Combined volume</h2>
+        <div class="muted small">Total weight moved (reps × weight) in each group session, stacked by person.</div>
+    </div>
+    <StackedVolumeChart Sessions="Progress.Sessions" People="StackPeople(charted)" ToLocal="Zone.ToLocal" Unit="@Unit" />
+</section>
+
+<section class="card-x stack-sm">
+    <div class="row-between">
+        <div>
+            <h2 class="mb-0">Exercise trends</h2>
+            <div class="muted small">Everyone's line for the same exercise. Hollow dots missed some reps.</div>
+        </div>
+        @if (Progress.Exercises.Count > 0)
+        {
+            <select class="form-select" style="width: auto; max-width: 100%" value="@exerciseId" @onchange="e => exerciseId = int.Parse(e.Value!.ToString()!)" aria-label="Exercise">
+                @foreach (var e in Progress.Exercises)
+                {
+                    <option value="@e.Id">@e.Name</option>
+                }
+            </select>
+        }
+    </div>
+    @if (exercise is not null)
+    {
+        <div class="row-gap">
+            @foreach (var (key, label) in Metrics)
+            {
+                <button class="btn btn-sm @(metric == key ? "btn-accent" : "btn-soft")" @onclick="() => metric = key">@label</button>
+            }
+        </div>
+        <MultiTrendChart Series="SeriesFor(exercise.Id, charted)" ToLocal="Zone.ToLocal" Unit="@Unit"
+                         Label="@($"{exercise.Name}: {Metrics.First(m => m.Key == metric).Label} by person")" />
+        <div class="small"><a href="exercises/@exercise.Id?group=@Progress.Group.Id">Open @exercise.Name for everyone →</a></div>
+    }
+    else
+    {
+        <div class="empty">No finished workouts yet.</div>
+    }
+</section>
+
+@if (Progress.Exercises.Count > 0)
+{
+    <section class="card-x table-wrap" style="padding: 4px 8px">
+        <table class="table-x">
+            <thead>
+                <tr>
+                    <th>Exercise</th>
+                    @foreach (var m in Progress.Members)
+                    {
+                        <th class="text-end">
+                            <span class="legend d-inline-flex"><span class="key s@(Progress.Slot(m.Id) ?? 0)">@if (Progress.Slot(m.Id) is not null) {<span class="sw"></span>}@m.Name</span></span>
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in Progress.Exercises)
+                {
+                    <tr>
+                        <td><a class="fw-semibold" href="exercises/@e.Id?group=@Progress.Group.Id">@e.Name</a></td>
+                        @foreach (var m in Progress.Members)
+                        {
+                            <td class="text-end num text-nowrap">
+                                @if (Progress.Summaries.TryGetValue((m.Id, e.Id), out var s))
+                                {
+                                    <span class="fw-semibold" title="Current top weight · @s.Stats.SessionCount sessions">@s.Stats.LastTopWeight?.ToString("0.##")</span>
+                                    @if (s.Suggestion.Kind == SuggestionKind.Increase)
+                                    {
+                                        <span class="pill pill-good ms-1" title="@s.Suggestion.Reason">↑ @s.Suggestion.Weight?.ToString("0.##")</span>
+                                    }
+                                    else if (s.Suggestion.Kind == SuggestionKind.Deload)
+                                    {
+                                        <span class="pill pill-warn ms-1" title="@s.Suggestion.Reason">↓ @s.Suggestion.Weight?.ToString("0.##")</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+    <p class="muted small">Current top weight per person; ↑ / ↓ show the next suggested weight when the rules say to change it.</p>
+}
+
+@code {
+    private static readonly (string Key, string Label)[] Metrics =
+        [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("volume", "Volume")];
+
+    [Parameter, EditorRequired] public GroupProgress Progress { get; set; } = null!;
+    [Parameter, EditorRequired] public UserContext Zone { get; set; } = null!;
+    [Parameter] public string Unit { get; set; } = "lb";
+
+    private int exerciseId;
+    private string metric = "top";
+
+    protected override void OnParametersSet()
+    {
+        if (Progress.Exercises.All(e => e.Id != exerciseId))
+        {
+            // Start with the exercise the most people have done, most often.
+            exerciseId = Progress.Exercises
+                .OrderByDescending(e => Progress.Members.Count(m => Progress.Summaries.ContainsKey((m.Id, e.Id))))
+                .ThenByDescending(e => Progress.Members.Sum(m => Progress.Summaries.TryGetValue((m.Id, e.Id), out var s) ? s.Stats.SessionCount : 0))
+                .Select(e => e.Id)
+                .FirstOrDefault();
+        }
+    }
+
+    private IReadOnlyList<StackedVolumeChart.Person> StackPeople(List<ApplicationUser> charted) =>
+        charted.Select(m => new StackedVolumeChart.Person(m.Id, m.Name, Progress.Slot(m.Id)!.Value)).ToList();
+
+    private IReadOnlyList<MultiTrendChart.ChartSeries> SeriesFor(int exercise, List<ApplicationUser> charted) =>
+        charted.Select(m => new MultiTrendChart.ChartSeries(
+                m.Name,
+                Progress.Slot(m.Id)!.Value,
+                Progress.Summaries.TryGetValue((m.Id, exercise), out var s)
+                    ? s.Stats.Trend.Select(t => new MultiTrendChart.ChartPoint(t.DateUtc, Value(t), t.HitTargets)).ToList()
+                    : []))
+            .ToList();
+
+    private decimal Value(TrendPoint t) => metric switch
+    {
+        "e1rm" => t.Estimated1RM,
+        "volume" => t.Volume,
+        _ => t.TopWeight,
+    };
+
+    private static string Short(decimal v) => v >= 10000 ? $"{v / 1000:0.#}k" : v.ToString("#,0");
+}

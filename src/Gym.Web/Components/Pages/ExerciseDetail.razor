@@ -270,9 +270,13 @@ else
             <section class="card-x stack-sm">
                 <div class="row-between">
                     <h2 class="mb-0">Progress</h2>
-                    @if (teammates.Count > 1)
+                    @if (teammates.Count > 1 || groups.Count > 0)
                     {
-                        <select class="form-select" style="width: auto" value="@statsUserId" @onchange="e => ChangeUser(e.Value?.ToString())">
+                        <select class="form-select" style="width: auto" value="@(statsGroupId is { } sg ? $"g:{sg}" : statsUserId)" @onchange="e => ChangeUser(e.Value?.ToString())" aria-label="Whose progress">
+                            @foreach (var g in groups)
+                            {
+                                <option value="g:@g.Id">Everyone in @g.Name</option>
+                            }
                             @foreach (var t in teammates)
                             {
                                 <option value="@t.Id">@t.Name</option>
@@ -281,7 +285,63 @@ else
                     }
                 </div>
 
-                @if (summary is not null)
+                @if (statsGroupId is not null)
+                {
+                    @if (groupProgress is null)
+                    {
+                        <div class="empty">Group not found.</div>
+                    }
+                    else
+                    {
+                        var people = groupProgress.Members.Where(m => groupProgress.Summaries.ContainsKey((m.Id, Id))).ToList();
+                        if (people.Count == 0)
+                        {
+                            <div class="empty">Nobody in @groupProgress.Group.Name has done this exercise yet.</div>
+                        }
+                        else
+                        {
+                            <div class="row-gap">
+                                @foreach (var (key, label) in ChartModes)
+                                {
+                                    <button class="btn btn-sm @(chartMode == key ? "btn-accent" : "btn-soft")" @onclick="() => chartMode = key">@label</button>
+                                }
+                            </div>
+                            <MultiTrendChart Series="GroupSeries()" ToLocal="Me.ToLocal" Unit="@Unit"
+                                             Label="@($"{exercise.Name}: {ChartModes.First(m => m.Key == chartMode).Label} by person")" />
+                            <div class="muted small">Filled dots hit every target; hollow dots missed some reps.</div>
+                            <div class="table-wrap">
+                                <table class="table-x">
+                                    <thead>
+                                        <tr><th>Person</th><th class="text-end">Sessions</th><th>First</th><th>Last</th><th>Range</th><th class="text-end">Current</th><th class="text-end">Est. 1RM</th><th class="text-end">Streak</th><th>Next time</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var m in people)
+                                        {
+                                            var ps = groupProgress.Summaries[(m.Id, Id)];
+                                            var slot = groupProgress.Slot(m.Id);
+                                            <tr>
+                                                <td class="text-nowrap">
+                                                    <span class="legend d-inline-flex"><span class="key s@(slot ?? 0)">@if (slot is not null) {<span class="sw"></span>}<a href="exercises/@Id?user=@m.Id" @onclick="() => ChangeUser(m.Id)" @onclick:preventDefault>@m.Name</a></span></span>
+                                                </td>
+                                                <td class="text-end num">@ps.Stats.SessionCount</td>
+                                                <td class="text-nowrap muted">@(ps.Stats.FirstUtc is { } f ? Local(f, "MMM d, yy") : "")</td>
+                                                <td class="text-nowrap">@(ps.Stats.LastUtc is { } l ? Local(l, "MMM d") : "")</td>
+                                                <td class="num text-nowrap">@W(ps.Stats.MinWeight)–@W(ps.Stats.MaxWeight) @m.WeightUnit</td>
+                                                <td class="text-end num fw-semibold">@W(ps.Stats.LastTopWeight)</td>
+                                                <td class="text-end num">@W(ps.Stats.BestEstimated1RM)</td>
+                                                <td class="text-end num">@ps.Stats.TargetStreak</td>
+                                                <td class="text-nowrap" title="@ps.Suggestion.Reason">
+                                                    @(ps.Suggestion.Kind switch { SuggestionKind.Increase => "↑ ", SuggestionKind.Deload => "↓ ", _ => "= " })@W(ps.Suggestion.Weight)
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                }
+                else if (summary is not null)
                 {
                     var st = summary.Stats;
                     var unit = StatsUser?.WeightUnit ?? Unit;
@@ -364,6 +424,7 @@ else
 @code {
     [Parameter] public int Id { get; set; }
     [SupplyParameterFromQuery(Name = "user")] public string? QueryUser { get; set; }
+    [SupplyParameterFromQuery(Name = "group")] public int? QueryGroup { get; set; }
 
     private static readonly (string Key, string Label)[] ChartModes =
         [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("volume", "Volume")];
@@ -379,6 +440,9 @@ else
     private string videoUrl = "";
     private List<ApplicationUser> teammates = [];
     private string statsUserId = "";
+    private List<WorkoutGroup> groups = [];
+    private int? statsGroupId;
+    private GroupProgress? groupProgress;
     private ExerciseSummary? summary;
     private List<HistoryEntry> history = [];
     private UserExerciseSetting mine = new();
@@ -418,8 +482,10 @@ else
 
         if (teammates.Count == 0)
         {
-            teammates = await Groups.GetTeammatesAsync(UserId);
+            teammates = GroupService.Ordered(await Groups.GetTeammatesAsync(UserId)).ToList();
+            groups = await Groups.GetGroupsAsync(UserId);
             statsUserId = teammates.Any(t => t.Id == QueryUser) ? QueryUser! : UserId;
+            statsGroupId = groups.Any(g => g.Id == QueryGroup) ? QueryGroup : null;
         }
 
         await LoadStatsAsync();
@@ -427,6 +493,12 @@ else
 
     private async Task LoadStatsAsync()
     {
+        if (statsGroupId is { } groupId)
+        {
+            groupProgress = await Stats.GetGroupProgressAsync(groupId, UserId);
+            return;
+        }
+
         summary = await Stats.GetSummaryAsync(statsUserId, Id);
         history = await Stats.GetHistoryAsync(statsUserId, Id);
         mine = await Stats.GetUserExerciseAsync(statsUserId, Id);
@@ -439,9 +511,28 @@ else
             return;
         }
 
-        statsUserId = id;
+        if (id.StartsWith("g:", StringComparison.Ordinal) && int.TryParse(id[2..], out var groupId))
+        {
+            statsGroupId = groupId;
+        }
+        else
+        {
+            statsGroupId = null;
+            statsUserId = id;
+        }
+
         await LoadStatsAsync();
     }
+
+    private IReadOnlyList<MultiTrendChart.ChartSeries> GroupSeries() =>
+        groupProgress!.Members
+            .Where(m => groupProgress.Slot(m.Id) is not null && groupProgress.Summaries.ContainsKey((m.Id, Id)))
+            .Select(m => new MultiTrendChart.ChartSeries(
+                m.Name,
+                groupProgress.Slot(m.Id)!.Value,
+                groupProgress.Summaries[(m.Id, Id)].Stats.Trend
+                    .Select(t => new MultiTrendChart.ChartPoint(t.DateUtc, ChartValue(t), t.HitTargets)).ToList()))
+            .ToList();
 
     private void StartEdit()
     {

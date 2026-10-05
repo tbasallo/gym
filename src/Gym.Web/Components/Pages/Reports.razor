@@ -10,18 +10,33 @@
 <div class="stack">
     <div class="row-between">
         <h1 class="mb-0">Reports</h1>
-        @if (teammates.Count > 1)
+        @if (teammates.Count > 1 || groups.Count > 0)
         {
-            <div class="row-gap" role="group" aria-label="Person">
+            <div class="row-gap" role="group" aria-label="Whose progress">
+                @foreach (var g in groups)
+                {
+                    <button class="btn btn-sm @(selectedGroupId == g.Id ? "btn-accent" : "btn-soft")" @onclick="() => SelectGroup(g.Id)">Group: @g.Name</button>
+                }
                 @foreach (var t in teammates)
                 {
-                    <button class="btn btn-sm @(t.Id == selectedId ? "btn-accent" : "btn-soft")" @onclick="() => Select(t.Id)">@t.Name</button>
+                    <button class="btn btn-sm @(selectedGroupId is null && t.Id == selectedId ? "btn-accent" : "btn-soft")" @onclick="() => Select(t.Id)">@t.Name</button>
                 }
             </div>
         }
     </div>
 
-    @if (loaded)
+    @if (loaded && selectedGroupId is not null)
+    {
+        @if (groupProgress is null)
+        {
+            <div class="empty">Group not found.</div>
+        }
+        else
+        {
+            <GroupProgressView Progress="groupProgress" Zone="Me" Unit="@Unit" />
+        }
+    }
+    else if (loaded)
     {
         var unit = Selected?.WeightUnit ?? Unit;
         var ready = summaries.Count(s => s.Suggestion.Kind == SuggestionKind.Increase);
@@ -107,6 +122,9 @@
     private bool loaded;
     private List<ApplicationUser> teammates = [];
     private string selectedId = "";
+    private List<WorkoutGroup> groups = [];
+    private int? selectedGroupId;
+    private GroupProgress? groupProgress;
     private List<ExerciseSummary> summaries = [];
     private (int Total, int Last30Days, int Last7Days, DateTime? LastUtc) activity;
     private string filter = "all";
@@ -125,18 +143,34 @@
     {
         if (teammates.Count == 0)
         {
-            teammates = await Groups.GetTeammatesAsync(UserId);
+            teammates = GroupService.Ordered(await Groups.GetTeammatesAsync(UserId)).ToList();
+            groups = await Groups.GetGroupsAsync(UserId);
             selectedId = UserId;
         }
 
-        summaries = await Stats.GetSummariesAsync(selectedId);
-        activity = await Stats.GetActivityAsync(selectedId);
+        if (selectedGroupId is { } groupId)
+        {
+            groupProgress = await Stats.GetGroupProgressAsync(groupId, UserId);
+        }
+        else
+        {
+            summaries = await Stats.GetSummariesAsync(selectedId);
+            activity = await Stats.GetActivityAsync(selectedId);
+        }
+
         loaded = true;
     }
 
     private async Task Select(string id)
     {
+        selectedGroupId = null;
         selectedId = id;
+        await LoadAsync();
+    }
+
+    private async Task SelectGroup(int id)
+    {
+        selectedGroupId = id;
         await LoadAsync();
     }
 }

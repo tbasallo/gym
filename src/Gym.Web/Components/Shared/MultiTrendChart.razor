@@ -1,0 +1,152 @@
+@* One line per person on a shared time axis. Colors follow the person (group order), never their rank. *@
+
+@if (Series.All(s => s.Points.Count == 0))
+{
+    <div class="empty">No history yet.</div>
+}
+else
+{
+    <div class="legend mb-1" aria-hidden="true">
+        @foreach (var s in Series.Where(s => s.Points.Count > 0))
+        {
+            <span class="key s@(s.Slot)"><span class="sw line"></span>@s.Name</span>
+        }
+    </div>
+    <svg class="chart" viewBox="0 0 @W @H" role="img" aria-label="@Label">
+        <g class="grid">
+            @foreach (var tick in ticks)
+            {
+                <line x1="@Pad.L" x2="@(W - Pad.R)" y1="@F(Y(tick))" y2="@F(Y(tick))" />
+            }
+        </g>
+        <g class="axis">
+            @foreach (var tick in ticks)
+            {
+                @Text(Pad.L - 6, Y(tick) + 4, "end", tick.ToString("#,0.#"))
+            }
+            @Text(Pad.L, H - 4, "start", Format(minDate))
+            @if (maxDate > minDate)
+            {
+                @Text(W - Pad.R - LabelRoom, H - 4, "end", Format(maxDate))
+            }
+        </g>
+        @foreach (var s in Series.Where(s => s.Points.Count > 0))
+        {
+            <g class="s@(s.Slot)">
+                @if (s.Points.Count > 1)
+                {
+                    <polyline class="sline" points="@string.Join(" ", s.Points.Select(p => $"{F(X(p.DateUtc))},{F(Y(p.Value))}"))" />
+                }
+                @foreach (var p in s.Points)
+                {
+                    <g class="p">
+                        <title>@s.Name · @Format(p.DateUtc): @p.Value.ToString("#,0.##") @Unit@(p.HitTargets ? " · hit targets" : " · missed targets")</title>
+                        <circle class="spt @(p.HitTargets ? "" : "miss")" cx="@F(X(p.DateUtc))" cy="@F(Y(p.Value))" r="4" />
+                    </g>
+                }
+            </g>
+        }
+        @* Direct labels at each line's end (up to four series), nudged apart so they never overlap. *@
+        @foreach (var (series, y) in labels)
+        {
+            <g class="s@(series.Slot)">@EndLabel(W - Pad.R - LabelRoom + 8, y + 4, series.Name)</g>
+        }
+    </svg>
+}
+
+@code {
+    public sealed record ChartPoint(DateTime DateUtc, decimal Value, bool HitTargets);
+
+    public sealed record ChartSeries(string Name, int Slot, IReadOnlyList<ChartPoint> Points);
+
+    [Parameter, EditorRequired] public IReadOnlyList<ChartSeries> Series { get; set; } = [];
+    [Parameter] public Func<DateTime, DateTime> ToLocal { get; set; } = d => d;
+    [Parameter] public string Unit { get; set; } = "lb";
+    [Parameter] public string Label { get; set; } = "Progress by person";
+
+    private const int W = 640;
+    private const int H = 240;
+    private const int LabelRoom = 72;
+    private static readonly (int L, int R, int T, int B) Pad = (58, 8, 14, 28);
+    private List<decimal> ticks = [];
+    private decimal min;
+    private decimal max;
+    private DateTime minDate;
+    private DateTime maxDate;
+    private List<(ChartSeries Series, double Y)> labels = [];
+
+    protected override void OnParametersSet()
+    {
+        var all = Series.SelectMany(s => s.Points).ToList();
+        if (all.Count == 0)
+        {
+            return;
+        }
+
+        minDate = all.Min(p => p.DateUtc);
+        maxDate = all.Max(p => p.DateUtc);
+        var lo = all.Min(p => p.Value);
+        var hi = all.Max(p => p.Value);
+        var step = NiceStep(Math.Max(hi - lo, 10) / 4);
+        min = Math.Max(0, Math.Floor((lo - step / 2) / step) * step);
+        max = Math.Ceiling((hi + step / 2) / step) * step;
+        ticks = [];
+        for (var t = min; t <= max; t += step)
+        {
+            ticks.Add(t);
+        }
+
+        labels = [];
+        var drawn = Series.Where(s => s.Points.Count > 0).ToList();
+        if (drawn.Count is > 1 and <= 4)
+        {
+            var ends = drawn.Select(s => (Series: s, Y: Y(s.Points[^1].Value))).OrderBy(e => e.Y).ToList();
+            const double gap = 14;
+            for (var i = 1; i < ends.Count; i++)
+            {
+                if (ends[i].Y - ends[i - 1].Y < gap)
+                {
+                    ends[i] = (ends[i].Series, ends[i - 1].Y + gap);
+                }
+            }
+
+            labels = ends;
+        }
+    }
+
+    private static decimal NiceStep(decimal raw)
+    {
+        foreach (var s in new[] { 1m, 2.5m, 5m, 10m, 20m, 25m, 50m, 100m, 250m, 500m, 1000m, 2500m, 5000m })
+        {
+            if (raw <= s)
+            {
+                return s;
+            }
+        }
+
+        return 10000m;
+    }
+
+    private double X(DateTime date)
+    {
+        var right = W - Pad.R - (labels.Count > 0 || Series.Count(s => s.Points.Count > 0) > 1 ? LabelRoom : 0);
+        return maxDate == minDate
+            ? (Pad.L + right) / 2.0
+            : Pad.L + (date - minDate).TotalSeconds / (maxDate - minDate).TotalSeconds * (right - Pad.L);
+    }
+
+    private double Y(decimal v) => max == min
+        ? H / 2.0
+        : Pad.T + (double)((max - v) / (max - min)) * (H - Pad.T - Pad.B);
+
+    private static string F(double d) => d.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    // Razor reserves <text>, so SVG text elements are emitted as markup.
+    private static MarkupString Text(double x, double y, string anchor, string content) =>
+        new($"<text x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\">{System.Net.WebUtility.HtmlEncode(content)}</text>");
+
+    private static MarkupString EndLabel(double x, double y, string content) =>
+        new($"<text class=\"slabel\" x=\"{F(x)}\" y=\"{F(y)}\">{System.Net.WebUtility.HtmlEncode(content)}</text>");
+
+    private string Format(DateTime utc) => ToLocal(utc).ToString("MMM d");
+}

@@ -82,6 +82,10 @@ public sealed class GroupService(IDbContextFactory<ApplicationDbContext> dbFacto
             .ToListAsync();
     }
 
+    /// <summary>The one ordering used everywhere people appear side by side, so each keeps their color.</summary>
+    public static IEnumerable<ApplicationUser> Ordered(IEnumerable<ApplicationUser> people) =>
+        people.OrderBy(u => u.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(u => u.Id);
+
     private static async Task<WorkoutGroup> RequireMemberAsync(ApplicationDbContext db, int groupId, string userId) =>
         await db.Groups.SingleOrDefaultAsync(g => g.Id == groupId && g.Members.Any(m => m.UserId == userId))
             ?? throw new UnauthorizedAccessException("Not a member of this group.");

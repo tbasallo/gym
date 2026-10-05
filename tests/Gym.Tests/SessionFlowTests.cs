@@ -185,5 +185,36 @@ public sealed class SessionFlowTests : IDisposable
         Assert.Contains(all, s => s.Exercise.Id == bench.ExerciseId);
     }
 
+    [Fact]
+    public async Task Group_progress_combines_everyone()
+    {
+        var (schedule, id) = await StartGroupSessionAsync();
+        var bench = (await _sessions.GetAsync(id, _tony.Id))!.Exercises[0];
+        await _sessions.LogSetAsync(id, _tony.Id, bench.Id, _tony.Id, 8, 100);
+        await _sessions.LogSetAsync(id, _tony.Id, bench.Id, _tony.Id, 8, 100);
+        await _sessions.LogSetAsync(id, _tony.Id, bench.Id, _maria.Id, 10, 50);
+        await _sessions.FinishAsync(id, _tony.Id);
+
+        var progress = await _stats.GetGroupProgressAsync(schedule.GroupId!.Value, _maria.Id);
+
+        Assert.NotNull(progress);
+        Assert.Equal(["Maria", "Tony"], progress.Members.Select(m => m.Name));
+        Assert.Equal(0, progress.Slot(_maria.Id));
+        Assert.Equal(1, progress.Slot(_tony.Id));
+        Assert.Null(progress.Slot(_stranger.Id));
+
+        var session = Assert.Single(progress.Sessions);
+        Assert.Equal(1600m, session.VolumeByUser[_tony.Id]);
+        Assert.Equal(500m, session.VolumeByUser[_maria.Id]);
+        Assert.Equal(2100m, session.Total);
+
+        Assert.Equal(bench.ExerciseId, Assert.Single(progress.Exercises).Id);
+        Assert.Equal(100m, progress.Summaries[(_tony.Id, bench.ExerciseId)].Stats.LastTopWeight);
+        Assert.Equal(50m, progress.Summaries[(_maria.Id, bench.ExerciseId)].Stats.LastTopWeight);
+        Assert.False(progress.MixedUnits);
+
+        Assert.Null(await _stats.GetGroupProgressAsync(schedule.GroupId!.Value, _stranger.Id));
+    }
+
     public void Dispose() => _db.Dispose();
 }

@@ -1,7 +1,7 @@
 @* Read-only recap of a finished (or discarded) session. *@
 
 @{
-    var people = Session.Participants.Select(p => p.User).OrderBy(u => u.Name).ThenBy(u => u.Id).ToList();
+    var people = GroupService.Ordered(Session.Participants.Select(p => p.User)).ToList();
 }
 
 <div class="stack">
@@ -47,7 +47,7 @@
                         .OrderBy(s => s.SetNumber).ToList();
                     var started = sets.Select(s => s.StartedUtc ?? s.CompletedUtc).Min();
                     var ended = sets.Max(s => s.CompletedUtc);
-                    <div class="person p@(i % 4)">
+                    <div class="person p@(Slot(person, i) % 4)">
                         <div class="person-name"><span class="dot"></span>@person.Name</div>
                         @if (sets.Count == 0)
                         {
@@ -82,6 +82,15 @@
 @code {
     [Parameter, EditorRequired] public WorkoutSession Session { get; set; } = null!;
     [Parameter, EditorRequired] public UserContext Zone { get; set; } = null!;
+
+    /// <summary>Group members in color order; people keep the same color as everywhere else.</summary>
+    [Parameter] public IReadOnlyList<ApplicationUser> ColorOrder { get; set; } = [];
+
+    private int Slot(ApplicationUser person, int fallback)
+    {
+        var index = ColorOrder.ToList().FindIndex(p => p.Id == person.Id);
+        return index >= 0 ? index : fallback;
+    }
 
     private static string Duration(TimeSpan span) =>
         span.TotalHours >= 1 ? $"{(int)span.TotalHours}h {span.Minutes}m" : span.TotalMinutes >= 1 ? $"{(int)span.TotalMinutes}m {span.Seconds}s" : $"{span.Seconds}s";

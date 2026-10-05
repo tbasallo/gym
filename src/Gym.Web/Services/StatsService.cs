@@ -7,6 +7,32 @@ public sealed record HistoryEntry(int SessionId, string Title, DateTime DateUtc,
 
 public sealed record ExerciseSummary(Exercise Exercise, ExerciseStats Stats, ProgressionSuggestion Suggestion);
 
+/// <summary>Volume each person lifted in one group session.</summary>
+public sealed record GroupSessionVolume(int SessionId, string Title, DateTime DateUtc, IReadOnlyDictionary<string, decimal> VolumeByUser)
+{
+    public decimal Total => VolumeByUser.Values.Sum();
+}
+
+/// <summary>Everyone in a group side by side: combined session volume plus each person's per-exercise stats.</summary>
+public sealed record GroupProgress(
+    WorkoutGroup Group,
+    IReadOnlyList<ApplicationUser> Members,
+    IReadOnlyList<GroupSessionVolume> Sessions,
+    IReadOnlyList<Exercise> Exercises,
+    IReadOnlyDictionary<(string UserId, int ExerciseId), ExerciseSummary> Summaries)
+{
+    /// <summary>Chart color slot for a person: their position in the group (0-3), or null beyond four.</summary>
+    public int? Slot(string userId)
+    {
+        var index = Members.ToList().FindIndex(m => m.Id == userId);
+        return index is >= 0 and < MaxCharted ? index : null;
+    }
+
+    public const int MaxCharted = 4;
+
+    public bool MixedUnits => Members.Select(m => m.WeightUnit).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+}
+
 public sealed record PlannedExercise(SessionPerformance? Last, ProgressionSuggestion Suggestion, decimal? WorkingWeight, int? TargetSets, int? TargetReps);
 
 public sealed class StatsService(IDbContextFactory<ApplicationDbContext> dbFactory, TimeProvider clock)
@@ -103,6 +129,64 @@ public sealed class StatsService(IDbContextFactory<ApplicationDbContext> dbFacto
             .Select(e => Summarize(e, history[e.Id], settings, working.GetValueOrDefault(e.Id)))
             .OrderByDescending(s => s.Stats.LastUtc)
             .ToList();
+    }
+
+    /// <summary>Progress for every member of a group the user belongs to.</summary>
+    public async Task<GroupProgress?> GetGroupProgressAsync(int groupId, string actingUserId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var group = await db.Groups.AsNoTracking()
+            .Include(g => g.Members).ThenInclude(m => m.User)
+            .SingleOrDefaultAsync(g => g.Id == groupId && g.Members.Any(m => m.UserId == actingUserId));
+        if (group is null)
+        {
+            return null;
+        }
+
+        var members = GroupService.Ordered(group.Members.Select(m => m.User)).ToList();
+        var memberIds = members.Select(m => m.Id).ToList();
+
+        var rows = await db.SetLogs.AsNoTracking()
+            .Where(s => s.Session.GroupId == groupId && s.Session.Status == SessionStatus.Completed
+                && s.CompletedUtc != null && s.Reps > 0 && memberIds.Contains(s.UserId))
+            .Select(s => new { s.SessionId, s.Session.Title, s.Session.StartedUtc, s.UserId, s.Reps, s.Weight })
+            .ToListAsync();
+        var sessions = rows
+            .GroupBy(r => r.SessionId)
+            .Select(g => new GroupSessionVolume(
+                g.Key,
+                g.First().Title,
+                g.First().StartedUtc,
+                g.GroupBy(r => r.UserId).ToDictionary(u => u.Key, u => u.Sum(r => r.Reps * r.Weight))))
+            .OrderBy(s => s.DateUtc)
+            .ToList();
+
+        var summaries = new Dictionary<(string, int), ExerciseSummary>();
+        var exerciseIds = new HashSet<int>();
+        var histories = new Dictionary<string, Dictionary<int, List<HistoryEntry>>>();
+        foreach (var member in members)
+        {
+            histories[member.Id] = await LoadAsync(db, member.Id, null);
+            exerciseIds.UnionWith(histories[member.Id].Keys);
+        }
+
+        var exercises = await db.Exercises.AsNoTracking().Where(e => exerciseIds.Contains(e.Id)).OrderBy(e => e.Name).ToListAsync();
+        foreach (var member in members)
+        {
+            var settings = await GetSettingsAsync(member.Id);
+            var working = await db.UserExerciseSettings.AsNoTracking()
+                .Where(s => s.UserId == member.Id)
+                .ToDictionaryAsync(s => s.ExerciseId, s => s.WorkingWeight);
+            foreach (var exercise in exercises)
+            {
+                if (histories[member.Id].TryGetValue(exercise.Id, out var history))
+                {
+                    summaries[(member.Id, exercise.Id)] = Summarize(exercise, history, settings, working.GetValueOrDefault(exercise.Id));
+                }
+            }
+        }
+
+        return new GroupProgress(group, members, sessions, exercises, summaries);
     }
 
     /// <summary>Last performance and suggestion for each participant and exercise in a session.</summary>

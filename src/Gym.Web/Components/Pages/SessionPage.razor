@@ -23,7 +23,7 @@
 }
 else if (session.Status != SessionStatus.Active)
 {
-    <SessionSummary Session="session" Zone="Me" />
+    <SessionSummary Session="session" Zone="Me" ColorOrder="teammates" />
 }
 else
 {
@@ -137,7 +137,7 @@ else
                     var person = participants[i];
                     var p = plan.GetValueOrDefault((person.Id, current.ExerciseId));
                     <ParticipantColumn User="person"
-                                       Index="i"
+                                       Index="ColorSlot(person, i)"
                                        Exercise="current"
                                        Sets="session.Sets"
                                        Plan="p"
@@ -228,15 +228,19 @@ else
             return;
         }
 
-        participants = session.Participants.Select(p => p.User).OrderBy(u => u.Name).ThenBy(u => u.Id).ToList();
+        participants = GroupService.Ordered(session.Participants.Select(p => p.User)).ToList();
 
         // Suggestions only change when the line-up changes, not on every set.
         var key = string.Join(",", participants.Select(p => p.Id)) + "|" + string.Join(",", session.Exercises.Select(e => e.Id));
-        if (key != planKey && session.Status == SessionStatus.Active)
+        if (key != planKey)
         {
-            plan = await Stats.GetPlanAsync(session);
-            teammates = session.GroupId is null ? participants : (await Groups.GetGroupsAsync(UserId))
-                .Where(g => g.Id == session.GroupId).SelectMany(g => g.Members.Select(m => m.User)).ToList();
+            if (session.Status == SessionStatus.Active)
+            {
+                plan = await Stats.GetPlanAsync(session);
+            }
+
+            teammates = session.GroupId is null ? participants : GroupService.Ordered((await Groups.GetGroupsAsync(UserId))
+                .Where(g => g.Id == session.GroupId).SelectMany(g => g.Members.Select(m => m.User))).ToList();
             planKey = key;
         }
 
@@ -339,6 +343,13 @@ else
         }
 
         return draft;
+    }
+
+    /// <summary>A person's color comes from their place in the group, so it matches the progress charts.</summary>
+    private int ColorSlot(ApplicationUser person, int fallback)
+    {
+        var index = teammates.FindIndex(t => t.Id == person.Id);
+        return index >= 0 ? index : fallback;
     }
 
     private DateTime? LastCompleted(string userId) =>
