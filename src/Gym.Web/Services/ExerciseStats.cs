@@ -1,6 +1,6 @@
 namespace Gym.Web.Services;
 
-public sealed record TrendPoint(DateTime DateUtc, decimal TopWeight, decimal Volume, decimal Estimated1RM, bool HitTargets);
+public sealed record TrendPoint(DateTime DateUtc, decimal TopWeight, decimal Estimated1RM, bool HitTargets);
 
 public sealed record ExerciseStats(
     DateTime? FirstUtc,
@@ -13,10 +13,9 @@ public sealed record ExerciseStats(
     decimal? BestEstimated1RM,
     int TargetStreak,
     int SessionsAtCurrentWeight,
-    decimal TotalVolume,
     IReadOnlyList<TrendPoint> Trend)
 {
-    public static ExerciseStats Empty { get; } = new(null, null, 0, 0, null, null, null, null, 0, 0, 0, []);
+    public static ExerciseStats Empty { get; } = new(null, null, 0, 0, null, null, null, null, 0, 0, []);
 
     /// <summary>Builds stats from completed sessions in any order.</summary>
     public static ExerciseStats From(IEnumerable<SessionPerformance> sessions)
@@ -42,7 +41,6 @@ public sealed record ExerciseStats(
             BestEstimated1RM: history.Max(h => h.Estimated1RM),
             TargetStreak: newestFirst.TakeWhile(h => h.HitTargets).Count(),
             SessionsAtCurrentWeight: newestFirst.TakeWhile(h => h.TopWeight == last.TopWeight).Count(),
-            TotalVolume: history.Sum(h => h.Volume),
-            Trend: history.Select(h => new TrendPoint(h.DateUtc, h.TopWeight, h.Volume, h.Estimated1RM, h.HitTargets)).ToList());
+            Trend: history.Select(h => new TrendPoint(h.DateUtc, h.TopWeight, h.Estimated1RM, h.HitTargets)).ToList());
     }
 }

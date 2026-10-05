@@ -486,10 +486,8 @@ a { color: var(--accent); }
 .chart .sline { fill: none; stroke: var(--sc); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart .spt { fill: var(--sc); stroke: var(--surface); stroke-width: 2; }
 .chart .spt.miss { fill: var(--surface); stroke: var(--sc); }
-.chart .sbar { fill: var(--sc); stroke: var(--surface); stroke-width: 2; }
 .chart .slabel { fill: var(--text); font-size: 11px; font-weight: 600; }
 .chart g.p:hover .spt { r: 6; }
-.chart g.bar:hover .sbar { filter: brightness(1.1); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .85rem; color: var(--text); }
 .legend .key { display: inline-flex; align-items: center; gap: 6px; }
 .legend .sw { width: 12px; height: 12px; border-radius: 3px; background: var(--sc); flex: none; }

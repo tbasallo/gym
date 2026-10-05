@@ -1,4 +1,4 @@
-@* Everyone in a group together: combined volume, per-exercise trend lines and a side-by-side table. *@
+@* Everyone in a group together: per-exercise trend lines and a side-by-side table. *@
 
 @{
     var charted = Progress.Members.Where(m => Progress.Slot(m.Id) is not null).ToList();
@@ -10,7 +10,7 @@
 <div class="tiles">
     <div class="tile"><div class="label">Group sessions</div><div class="value">@Progress.Sessions.Count</div><div class="sub">all time</div></div>
     <div class="tile"><div class="label">Last 30 days</div><div class="value">@recent.Count</div><div class="sub">@recent.Count(s => s.DateUtc >= now.AddDays(-7)) this week</div></div>
-    <div class="tile"><div class="label">Lifted together</div><div class="value">@Short(recent.Sum(s => s.Total))</div><div class="sub">@Unit, last 30 days</div></div>
+    <div class="tile"><div class="label">Ready to move up</div><div class="value" style="color: var(--good)">@Progress.Summaries.Values.Count(s => s.Suggestion.Kind == SuggestionKind.Increase)</div><div class="sub">across everyone</div></div>
     <div class="tile"><div class="label">People</div><div class="value">@Progress.Members.Count</div><div class="sub">in @Progress.Group.Name</div></div>
 </div>
 
@@ -22,14 +22,6 @@
 {
     <div class="muted small">Charts show the first @GroupProgress.MaxCharted people; the table below includes everyone.</div>
 }
-
-<section class="card-x stack-sm">
-    <div>
-        <h2 class="mb-0">Combined volume</h2>
-        <div class="muted small">Total weight moved (reps × weight) in each group session, stacked by person.</div>
-    </div>
-    <StackedVolumeChart Sessions="Progress.Sessions" People="StackPeople(charted)" ToLocal="Zone.ToLocal" Unit="@Unit" />
-</section>
 
 <section class="card-x stack-sm">
     <div class="row-between">
@@ -116,7 +108,7 @@
 
 @code {
     private static readonly (string Key, string Label)[] Metrics =
-        [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("volume", "Volume")];
+        [("top", "Top weight"), ("e1rm", "Est. 1RM")];
 
     [Parameter, EditorRequired] public GroupProgress Progress { get; set; } = null!;
     [Parameter, EditorRequired] public UserContext Zone { get; set; } = null!;
@@ -138,9 +130,6 @@
         }
     }
 
-    private IReadOnlyList<StackedVolumeChart.Person> StackPeople(List<ApplicationUser> charted) =>
-        charted.Select(m => new StackedVolumeChart.Person(m.Id, m.Name, Progress.Slot(m.Id)!.Value)).ToList();
-
     private IReadOnlyList<MultiTrendChart.ChartSeries> SeriesFor(int exercise, List<ApplicationUser> charted) =>
         charted.Select(m => new MultiTrendChart.ChartSeries(
                 m.Name,
@@ -153,9 +142,7 @@
     private decimal Value(TrendPoint t) => metric switch
     {
         "e1rm" => t.Estimated1RM,
-        "volume" => t.Volume,
         _ => t.TopWeight,
     };
 
-    private static string Short(decimal v) => v >= 10000 ? $"{v / 1000:0.#}k" : v.ToString("#,0");
 }

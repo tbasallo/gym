@@ -9,8 +9,6 @@ public sealed record SessionPerformance(DateTime DateUtc, int TargetSets, int Ta
 {
     public decimal TopWeight => Sets.Count == 0 ? 0 : Sets.Max(s => s.Weight);
 
-    public decimal Volume => Sets.Sum(s => s.Reps * s.Weight);
-
     /// <summary>Every target set was done for the target reps at the session's top weight.</summary>
     public bool HitTargets =>
         Sets.Count(s => s.Weight >= TopWeight && s.Reps >= TargetReps) >= Math.Max(1, TargetSets);

@@ -27,7 +27,7 @@
             <div class="tile">
                 <div class="label">@person.Name</div>
                 <div class="value">@sets.Count <span class="muted" style="font-size: .9rem">sets</span></div>
-                <div class="sub num">@sets.Sum(s => s.Reps * s.Weight).ToString("#,0") @person.WeightUnit volume</div>
+                <div class="sub num">@sets.Select(s => s.SessionExerciseId).Distinct().Count() exercises · @sets.Sum(s => s.Reps) reps</div>
             </div>
         }
     </div>

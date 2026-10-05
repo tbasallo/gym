@@ -393,7 +393,7 @@ else
                     {
                         <div class="table-wrap">
                             <table class="table-x">
-                                <thead><tr><th>Date</th><th>Sets (reps × weight)</th><th>Top</th><th>Volume</th><th>Time</th></tr></thead>
+                                <thead><tr><th>Date</th><th>Sets (reps × weight)</th><th>Top</th><th>Est. 1RM</th><th>Time</th></tr></thead>
                                 <tbody>
                                     @foreach (var h in history)
                                     {
@@ -407,7 +407,7 @@ else
                                                 }
                                             </td>
                                             <td class="num">@h.Performance.TopWeight.ToString("0.##")</td>
-                                            <td class="num">@h.Performance.Volume.ToString("#,0")</td>
+                                            <td class="num">@h.Performance.Estimated1RM.ToString("0.#")</td>
                                             <td class="num muted">@(h.TimeUnderLoad is { } t ? Clock(t) : "")</td>
                                         </tr>
                                     }
@@ -427,7 +427,7 @@ else
     [SupplyParameterFromQuery(Name = "group")] public int? QueryGroup { get; set; }
 
     private static readonly (string Key, string Label)[] ChartModes =
-        [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("volume", "Volume")];
+        [("top", "Top weight"), ("e1rm", "Est. 1RM")];
 
     private Exercise? exercise;
     private Exercise form = new();
@@ -454,7 +454,6 @@ else
     private Func<TrendPoint, decimal> ChartValue => chartMode switch
     {
         "e1rm" => p => p.Estimated1RM,
-        "volume" => p => p.Volume,
         _ => p => p.TopWeight,
     };
 

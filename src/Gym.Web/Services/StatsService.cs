@@ -7,17 +7,14 @@ public sealed record HistoryEntry(int SessionId, string Title, DateTime DateUtc,
 
 public sealed record ExerciseSummary(Exercise Exercise, ExerciseStats Stats, ProgressionSuggestion Suggestion);
 
-/// <summary>Volume each person lifted in one group session.</summary>
-public sealed record GroupSessionVolume(int SessionId, string Title, DateTime DateUtc, IReadOnlyDictionary<string, decimal> VolumeByUser)
-{
-    public decimal Total => VolumeByUser.Values.Sum();
-}
+/// <summary>A finished group session and who logged sets in it.</summary>
+public sealed record GroupSession(int SessionId, string Title, DateTime DateUtc, IReadOnlyList<string> UserIds);
 
-/// <summary>Everyone in a group side by side: combined session volume plus each person's per-exercise stats.</summary>
+/// <summary>Everyone in a group side by side: group sessions plus each person's per-exercise stats.</summary>
 public sealed record GroupProgress(
     WorkoutGroup Group,
     IReadOnlyList<ApplicationUser> Members,
-    IReadOnlyList<GroupSessionVolume> Sessions,
+    IReadOnlyList<GroupSession> Sessions,
     IReadOnlyList<Exercise> Exercises,
     IReadOnlyDictionary<(string UserId, int ExerciseId), ExerciseSummary> Summaries)
 {
@@ -149,15 +146,12 @@ public sealed class StatsService(IDbContextFactory<ApplicationDbContext> dbFacto
         var rows = await db.SetLogs.AsNoTracking()
             .Where(s => s.Session.GroupId == groupId && s.Session.Status == SessionStatus.Completed
                 && s.CompletedUtc != null && s.Reps > 0 && memberIds.Contains(s.UserId))
-            .Select(s => new { s.SessionId, s.Session.Title, s.Session.StartedUtc, s.UserId, s.Reps, s.Weight })
+            .Select(s => new { s.SessionId, s.Session.Title, s.Session.StartedUtc, s.UserId })
+            .Distinct()
             .ToListAsync();
         var sessions = rows
             .GroupBy(r => r.SessionId)
-            .Select(g => new GroupSessionVolume(
-                g.Key,
-                g.First().Title,
-                g.First().StartedUtc,
-                g.GroupBy(r => r.UserId).ToDictionary(u => u.Key, u => u.Sum(r => r.Reps * r.Weight))))
+            .Select(g => new GroupSession(g.Key, g.First().Title, g.First().StartedUtc, g.Select(r => r.UserId).ToList()))
             .OrderBy(s => s.DateUtc)
             .ToList();
 

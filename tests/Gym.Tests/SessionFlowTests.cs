@@ -204,9 +204,7 @@ public sealed class SessionFlowTests : IDisposable
         Assert.Null(progress.Slot(_stranger.Id));
 
         var session = Assert.Single(progress.Sessions);
-        Assert.Equal(1600m, session.VolumeByUser[_tony.Id]);
-        Assert.Equal(500m, session.VolumeByUser[_maria.Id]);
-        Assert.Equal(2100m, session.Total);
+        Assert.Equal([_maria.Id, _tony.Id], session.UserIds.Order());
 
         Assert.Equal(bench.ExerciseId, Assert.Single(progress.Exercises).Id);
         Assert.Equal(100m, progress.Summaries[(_tony.Id, bench.ExerciseId)].Stats.LastTopWeight);
