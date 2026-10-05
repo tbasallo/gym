@@ -117,6 +117,8 @@ Edit the entities in `src/Gym.Web/Data`, then create a SQL Server migration:
 ./scripts/add-migration.sh AddSomething
 ```
 
+Tables are never schema-qualified: no `dbo.`, no default schema. SQL Server creates them in the default schema of the database user in `DbConnectionString`, and that user needs permission to create tables there. `SchemaTests` fails the build if a schema sneaks into the model or the migrations.
+
 Commit the generated files. The deployed app applies pending migrations when it starts. To manage migrations yourself, set `Database:InitializeOnStartup=false`.
 
 ## How the progression rules work
