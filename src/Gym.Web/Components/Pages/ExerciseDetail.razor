@@ -62,19 +62,31 @@ else
         {
             <section class="card-x stack-sm">
                 <h3>Look it up online</h3>
-                <p class="muted small mb-1">Pulls the description, muscles, equipment and an image from the free wger.de exercise database.</p>
+                <p class="muted small mb-1">Fill in the description, muscles, equipment and an image from the free wger.de exercise database, or search the web yourself.</p>
                 <div class="row-gap">
-                    <input class="form-control" style="max-width: 340px" placeholder="e.g. squat" @bind="lookupTerm" @bind:event="oninput" />
-                    <button class="btn btn-soft" disabled="@(Busy || string.IsNullOrWhiteSpace(lookupTerm))" @onclick="() => Run(Lookup, reload: false)">Search</button>
+                    <input class="form-control" style="flex: 1; min-width: 180px; max-width: 340px" placeholder="e.g. squat" @bind="lookupTerm" @bind:event="oninput" />
+                    <button class="btn btn-soft" disabled="@(Busy || string.IsNullOrWhiteSpace(lookupTerm))" @onclick="() => Run(Lookup, reload: false)">Search exercise database</button>
                 </div>
+                @if (!string.IsNullOrWhiteSpace(SearchName))
+                {
+                    <div class="row-gap">
+                        <span class="muted small">Search the web for "@SearchName":</span>
+                        <a class="btn btn-sm btn-soft" href="@WebSearch.YouTube(SearchName)" target="_blank" rel="noopener">YouTube ↗</a>
+                        <a class="btn btn-sm btn-soft" href="@WebSearch.Bing(SearchName)" target="_blank" rel="noopener">Bing ↗</a>
+                    </div>
+                }
                 @if (lookupResults is not null)
                 {
-                    @if (lookupResults.Count == 0)
+                    @if (lookupResults.Error is not null)
                     {
-                        <div class="muted small">Nothing found (or the service is unreachable). Fill in the details below.</div>
+                        <div class="alert-x" style="background: var(--warn-soft); color: var(--warn)">@lookupResults.Error Use the YouTube or Bing links above, or fill in the details below.</div>
+                    }
+                    else if (lookupResults.Results.Count == 0)
+                    {
+                        <div class="muted small">No matches in the exercise database. Try a shorter name (e.g. "split squat"), or use the YouTube or Bing links.</div>
                     }
                     <ul class="list-x">
-                        @foreach (var r in lookupResults.Take(10))
+                        @foreach (var r in lookupResults.Results.Take(10))
                         {
                             <li class="row-between" style="padding: 6px 0">
                                 <div class="row-gap">
@@ -225,7 +237,8 @@ else
                         }
 
                         <div>
-                            <a class="btn btn-soft btn-sm" href="@YouTubeClient.SearchUrl(exercise.Name)" target="_blank" rel="noopener">Search YouTube ↗</a>
+                            <a class="btn btn-soft btn-sm" href="@WebSearch.YouTube(exercise.Name)" target="_blank" rel="noopener">Search YouTube ↗</a>
+                            <a class="btn btn-soft btn-sm" href="@WebSearch.Bing(exercise.Name)" target="_blank" rel="noopener">Search Bing ↗</a>
                             @if (YouTube.IsConfigured)
                             {
                                 <button class="btn btn-soft btn-sm" disabled="@Busy" @onclick="() => Run(FindVideos, reload: false)">Find videos here</button>
@@ -462,7 +475,10 @@ else
     private bool loaded;
     private bool editing;
     private string lookupTerm = "";
-    private IReadOnlyList<ExerciseLookupResult>? lookupResults;
+    private ExerciseLookup? lookupResults;
+
+    /// <summary>What the web search links look for: the lookup box, else the name being typed.</summary>
+    private string SearchName => !string.IsNullOrWhiteSpace(lookupTerm) ? lookupTerm.Trim() : form.Name?.Trim() ?? "";
     private IReadOnlyList<VideoResult>? videoResults;
     private string? previewId;
     private string videoUrl = "";
@@ -636,7 +652,7 @@ else
             form.Name = result.Name;
         }
 
-        if (!await ExerciseLibrary.ApplyLookupAsync(form, result.ExternalId))
+        if (!await ExerciseLibrary.ApplyLookupAsync(form, result))
         {
             throw new InvalidOperationException("Couldn't load details for that exercise right now.");
         }

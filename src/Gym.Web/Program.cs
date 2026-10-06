@@ -60,8 +60,9 @@ builder.Services.AddScoped<SampleDataService>();
 builder.Services.AddHttpClient<YouTubeClient>(c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddHttpClient<WgerClient>(c =>
 {
-    c.Timeout = TimeSpan.FromSeconds(10);
+    c.Timeout = TimeSpan.FromSeconds(15);
     c.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("GymTracker/1.0 (+https://github.com/tbasallo/gym)");
 });
 
 var app = builder.Build();

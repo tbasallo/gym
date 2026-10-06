@@ -79,12 +79,12 @@ public sealed class ExerciseService(IDbContextFactory<ApplicationDbContext> dbFa
         return null;
     }
 
-    public Task<IReadOnlyList<ExerciseLookupResult>> LookupAsync(string term) => wger.SearchAsync(term);
+    public Task<ExerciseLookup> LookupAsync(string term) => wger.SearchAsync(term);
 
     /// <summary>Copies details from the online source onto the exercise, keeping anything it doesn't provide.</summary>
-    public async Task<bool> ApplyLookupAsync(Exercise exercise, string externalId)
+    public async Task<bool> ApplyLookupAsync(Exercise exercise, ExerciseLookupResult result)
     {
-        var details = await wger.GetAsync(externalId);
+        var details = result.Details ?? await wger.GetAsync(result.ExternalId);
         if (details is null)
         {
             return false;
