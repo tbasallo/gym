@@ -1,0 +1,31 @@
+@* Simple overlay dialog. Closes on the ✕ button, a tap on the backdrop, or Escape. *@
+
+<div class="modal-x-backdrop" @onclick="Close" @onkeydown="Key" tabindex="-1" @ref="backdrop">
+    <div class="modal-x" role="dialog" aria-modal="true" aria-label="@Title" @onclick:stopPropagation="true">
+        <div class="modal-x-head">
+            <h2 class="mb-0">@Title</h2>
+            <button class="btn btn-soft btn-icon" @onclick="Close" aria-label="Close">✕</button>
+        </div>
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference backdrop;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await backdrop.FocusAsync();
+        }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private Task Key(KeyboardEventArgs e) => e.Key == "Escape" ? Close() : Task.CompletedTask;
+}

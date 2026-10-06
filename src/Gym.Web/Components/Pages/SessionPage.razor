@@ -45,9 +45,14 @@ else
             {
                 var doneSets = session.Sets.Count(s => s.SessionExerciseId == ex.Id && !s.IsInProgress);
                 var goal = ex.TargetSets * session.Participants.Count;
-                <button role="tab" class="ex-tab @(ex.Id == current?.Id ? "active" : "") @(doneSets >= goal ? "done" : "")"
-                        aria-selected="@(ex.Id == current?.Id)" @onclick="() => selectedId = ex.Id">
+                var inBlock = current is not null && BlockOf(current).Contains(ex);
+                <button role="tab" class="ex-tab @(inBlock ? "active" : "") @(doneSets >= goal ? "done" : "") @(ex.SupersetGroup is not null ? "ss" : "")"
+                        aria-selected="@inBlock" @onclick="() => selectedId = ex.Id" title="@(ex.SupersetGroup is not null ? "Part of a superset" : null)">
                     <span class="n">@(doneSets >= goal ? "✓" : ex.Order.ToString())</span>
+                    @if (ex.SupersetGroup is not null)
+                    {
+                        <span class="ss-tag">⇄</span>
+                    }
                     @ex.Exercise.Name
                 </button>
             }
@@ -89,86 +94,148 @@ else
 
     @if (current is not null)
     {
-        var ex = current.Exercise;
-        var video = ex.Videos.FirstOrDefault(v => v.IsPrimary) ?? ex.Videos.FirstOrDefault();
+        var block = BlockOf(current);
+        var superset = block.Count > 1;
         <section class="card-x stack-sm" id="current-exercise">
-            <div class="row-between">
-                <div>
-                    <h2 class="mb-0">@ex.Name</h2>
-                    <div class="muted small">
-                        @current.TargetSets sets × @current.TargetReps reps
-                        @if (!string.IsNullOrEmpty(ex.Muscles))
-                        {
-                            <span> · @ex.Muscles</span>
-                        }
-                    </div>
-                </div>
-                <div class="row-gap">
-                    <button class="btn btn-soft btn-sm" @onclick="() => showHelp = !showHelp">@(showHelp ? "Hide help" : video is null ? "How to" : "▶ Video")@(!showHelp && ex.Links.Count > 0 ? $" · {ex.Links.Count} link{(ex.Links.Count == 1 ? "" : "s")}" : "")</button>
-                    <a class="btn btn-soft btn-sm" href="exercises/@ex.Id" target="_blank">Details</a>
-                </div>
-            </div>
-
-            @if (showHelp)
+            @if (superset)
             {
-                <div class="stack-sm">
-                    @if (video is not null)
-                    {
-                        <VideoEmbed YouTubeId="@video.YouTubeId" Title="@video.Title" />
-                    }
-                    else
-                    {
-                        <div class="muted small">
-                            No saved video yet.
-                            <a href="@YouTubeClient.SearchUrl(ex.Name)" target="_blank" rel="noopener">Search YouTube for "@ex.Name"</a>
-                            or save one on the <a href="exercises/@ex.Id" target="_blank">exercise page</a>.
-                        </div>
-                    }
-                    @if (!string.IsNullOrEmpty(ex.Description))
-                    {
-                        <p class="mb-0" style="white-space: pre-line">@ex.Description</p>
-                    }
-                    @if (ex.Links.Count > 0)
-                    {
-                        <div class="row-gap">
-                            @foreach (var link in ex.Links.OrderBy(l => l.AddedUtc))
-                            {
-                                <a class="btn btn-soft btn-sm" href="@link.Url" target="_blank" rel="noopener noreferrer" title="@link.Site">@link.Title ↗</a>
-                            }
-                        </div>
-                    }
+                <div class="row-between">
+                    <span class="ss-banner">⇄ Superset · @block.Count exercises</span>
+                    <span class="muted small">One set of each, back to back, then rest.</span>
                 </div>
             }
 
-            <div class="people">
-                @for (var i = 0; i < participants.Count; i++)
+            @foreach (var item in block)
+            {
+                var ex = item.Exercise;
+                var video = ex.Videos.FirstOrDefault(v => v.IsPrimary) ?? ex.Videos.FirstOrDefault();
+                var helpOpen = helpFor.Contains(item.Id);
+                <div class="stack-sm ss-member">
+                    <div class="row-between">
+                        <div>
+                            <h2 class="mb-0">@(superset ? $"{Letter(block, item)}. " : "")@ex.Name</h2>
+                            <div class="muted small">
+                                @item.TargetSets sets × @item.TargetReps reps
+                                @if (!string.IsNullOrEmpty(ex.Muscles))
+                                {
+                                    <span> · @ex.Muscles</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="row-gap">
+                            <button class="btn btn-soft btn-sm" @onclick="() => ToggleHelp(item.Id)">@(helpOpen ? "Hide help" : video is null ? "How to" : "▶ Video")@(!helpOpen && ex.Links.Count > 0 ? $" · {ex.Links.Count} link{(ex.Links.Count == 1 ? "" : "s")}" : "")</button>
+                            <button class="btn btn-soft btn-sm" disabled="@Busy" @onclick="() => Run(() => OpenTrend(item), reload: false)">Group trend</button>
+                            <a class="btn btn-soft btn-sm" href="exercises/@ex.Id" target="_blank">Details</a>
+                            @if (superset)
+                            {
+                                <button class="btn btn-link btn-sm" disabled="@Busy" title="Take this exercise out of the superset" @onclick="() => Run(() => Sessions.LeaveSupersetAsync(session.Id, UserId, item.Id))">Unlink</button>
+                            }
+                        </div>
+                    </div>
+
+                    @if (helpOpen)
+                    {
+                        <div class="stack-sm">
+                            @if (video is not null)
+                            {
+                                <VideoEmbed YouTubeId="@video.YouTubeId" Title="@video.Title" />
+                            }
+                            else
+                            {
+                                <div class="muted small">
+                                    No saved video yet.
+                                    <a href="@YouTubeClient.SearchUrl(ex.Name)" target="_blank" rel="noopener">Search YouTube for "@ex.Name"</a>
+                                    or save one on the <a href="exercises/@ex.Id" target="_blank">exercise page</a>.
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(ex.Description))
+                            {
+                                <p class="mb-0" style="white-space: pre-line">@ex.Description</p>
+                            }
+                            @if (ex.Links.Count > 0)
+                            {
+                                <div class="row-gap">
+                                    @foreach (var link in ex.Links.OrderBy(l => l.AddedUtc))
+                                    {
+                                        <a class="btn btn-soft btn-sm" href="@link.Url" target="_blank" rel="noopener noreferrer" title="@link.Site">@link.Title ↗</a>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <div class="people">
+                        @for (var i = 0; i < participants.Count; i++)
+                        {
+                            var person = participants[i];
+                            var p = plan.GetValueOrDefault((person.Id, item.ExerciseId));
+                            <ParticipantColumn User="person"
+                                               Index="ColorSlot(person, i)"
+                                               Exercise="item"
+                                               Sets="session.Sets"
+                                               Plan="p"
+                                               Draft="DraftFor(person, item)"
+                                               Now="now"
+                                               LastCompletedUtc="LastCompleted(person.Id)"
+                                               RestGoalSeconds="RestGoal(person, item)"
+                                               TargetSetsOverride="p?.TargetSets"
+                                               Busy="Busy"
+                                               OnStart="w => Run(() => Sessions.StartSetAsync(session.Id, UserId, item.Id, person.Id, w))"
+                                               OnComplete="a => Run(() => Sessions.CompleteSetAsync(session.Id, UserId, a.SetId, a.Reps, a.Weight))"
+                                               OnLog="a => Run(() => Sessions.LogSetAsync(session.Id, UserId, item.Id, person.Id, a.Reps, a.Weight))"
+                                               OnUpdate="a => Run(() => Sessions.UpdateSetAsync(session.Id, UserId, a.SetId, a.Reps, a.Weight))"
+                                               OnDelete="id => Run(() => Sessions.DeleteSetAsync(session.Id, UserId, id))" />
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (supersetPanel)
+            {
+                var others = session.Exercises.Where(e => !block.Contains(e)).ToList();
+                <div class="card-x stack-sm" style="background: var(--surface-2)">
+                    <div class="row-between">
+                        <strong>Superset @current.Exercise.Name with…</strong>
+                        <button class="btn btn-sm btn-soft" @onclick="() => supersetPanel = false">Close</button>
+                    </div>
+                    @if (others.Count > 0)
+                    {
+                        <div class="small muted">An exercise already in this session:</div>
+                        <ul class="list-x">
+                            @foreach (var other in others)
+                            {
+                                <li class="row-between" style="padding: 6px 0">
+                                    <span>@other.Exercise.Name @(other.SupersetGroup is not null ? "(in a superset)" : "")</span>
+                                    <button class="btn btn-sm btn-soft" disabled="@Busy" @onclick="() => Run(() => PairWith(current, other))">Pair</button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    <div class="small muted">Or add another exercise to the superset:</div>
+                    <ExercisePicker Exercises="library" OnPick="e => Run(() => AddToSuperset(current, e))" />
+                </div>
+            }
+
+            <div class="session-nav pt-1">
+                <button class="btn btn-soft" disabled="@(PreviousId is null)" @onclick="() => Go(PreviousId)">← Previous</button>
+                <button class="btn btn-soft" @onclick="() => supersetPanel = !supersetPanel" title="Do this with another exercise back to back">⇄ Superset</button>
+                @if (NextId is null)
                 {
-                    var person = participants[i];
-                    var p = plan.GetValueOrDefault((person.Id, current.ExerciseId));
-                    <ParticipantColumn User="person"
-                                       Index="ColorSlot(person, i)"
-                                       Exercise="current"
-                                       Sets="session.Sets"
-                                       Plan="p"
-                                       Draft="DraftFor(person, current)"
-                                       Now="now"
-                                       LastCompletedUtc="LastCompleted(person.Id)"
-                                       RestGoalSeconds="RestGoal(person, current)"
-                                       TargetSetsOverride="p?.TargetSets"
-                                       Busy="Busy"
-                                       OnStart="w => Run(() => Sessions.StartSetAsync(session.Id, UserId, current.Id, person.Id, w))"
-                                       OnComplete="a => Run(() => Sessions.CompleteSetAsync(session.Id, UserId, a.SetId, a.Reps, a.Weight))"
-                                       OnLog="a => Run(() => Sessions.LogSetAsync(session.Id, UserId, current.Id, person.Id, a.Reps, a.Weight))"
-                                       OnUpdate="a => Run(() => Sessions.UpdateSetAsync(session.Id, UserId, a.SetId, a.Reps, a.Weight))"
-                                       OnDelete="id => Run(() => Sessions.DeleteSetAsync(session.Id, UserId, id))" />
+                    <button class="btn btn-accent" @onclick="AskFinish">Finish</button>
+                }
+                else
+                {
+                    <button class="btn btn-soft" @onclick="() => Go(NextId)">Next →</button>
                 }
             </div>
-
-            <div class="row-between pt-1">
-                <button class="btn btn-soft" disabled="@(PreviousId is null)" @onclick="() => Go(PreviousId)">← Previous</button>
-                <button class="btn btn-soft" disabled="@(NextId is null)" @onclick="() => Go(NextId)">Next exercise →</button>
-            </div>
         </section>
+    }
+
+    @if (trendFor is not null)
+    {
+        <Modal Title="@($"{trendFor.Exercise.Name} · group trend")" OnClose="() => trendFor = null">
+            <ExerciseTrendPanel ExerciseName="@trendFor.Exercise.Name" People="trendPeople" ColorOrder="teammates" ToLocal="Me.ToLocal" Unit="@Unit" />
+        </Modal>
     }
 
     <details class="mt-3">
@@ -208,7 +275,10 @@ else
     private readonly HashSet<int> buzzedFor = [];
     private string planKey = "";
     private int? selectedId;
-    private bool showHelp;
+    private readonly HashSet<int> helpFor = [];
+    private bool supersetPanel;
+    private SessionExercise? trendFor;
+    private List<(ApplicationUser Person, ExerciseSummary Summary)> trendPeople = [];
     private bool showAdd;
     private bool confirmFinish;
     private DateTime now;
@@ -371,6 +441,38 @@ else
         session?.Exercises.FirstOrDefault(e =>
             participants.Any(p => session.Sets.Count(s => s.SessionExerciseId == e.Id && s.UserId == p.Id && !s.IsInProgress) < e.TargetSets));
 
+    /// <summary>The exercise plus its superset partners, in session order.</summary>
+    private List<SessionExercise> BlockOf(SessionExercise exercise) =>
+        exercise.SupersetGroup is { } group && session is not null
+            ? session.Exercises.Where(e => e.SupersetGroup == group).OrderBy(e => e.Order).ToList()
+            : [exercise];
+
+    /// <summary>Exercises grouped into blocks (a superset counts as one), in order.</summary>
+    private List<List<SessionExercise>> Blocks()
+    {
+        var blocks = new List<List<SessionExercise>>();
+        foreach (var e in session?.Exercises.OrderBy(e => e.Order) ?? Enumerable.Empty<SessionExercise>())
+        {
+            if (e.SupersetGroup is { } g && blocks.Count > 0 && blocks[^1][0].SupersetGroup == g)
+            {
+                blocks[^1].Add(e);
+            }
+            else if (e.SupersetGroup is { } g2 && blocks.FirstOrDefault(b => b[0].SupersetGroup == g2) is { } existing)
+            {
+                existing.Add(e);
+            }
+            else
+            {
+                blocks.Add([e]);
+            }
+        }
+
+        return blocks;
+    }
+
+    private static string Letter(List<SessionExercise> block, SessionExercise item) =>
+        ((char)('A' + block.IndexOf(item))).ToString();
+
     private int? Neighbor(int delta)
     {
         if (session is null || CurrentExercise is not { } current)
@@ -378,14 +480,52 @@ else
             return null;
         }
 
-        var index = session.Exercises.IndexOf(current) + delta;
-        return index >= 0 && index < session.Exercises.Count ? session.Exercises[index].Id : null;
+        var blocks = Blocks();
+        var index = blocks.FindIndex(b => b.Contains(current)) + delta;
+        return index >= 0 && index < blocks.Count ? blocks[index][0].Id : null;
+    }
+
+    private void ToggleHelp(int sessionExerciseId)
+    {
+        if (!helpFor.Remove(sessionExerciseId))
+        {
+            helpFor.Add(sessionExerciseId);
+        }
+    }
+
+    private async Task AskFinish()
+    {
+        confirmFinish = true;
+        await JS.InvokeVoidAsync("scrollTo", 0, 0);
+    }
+
+    private async Task PairWith(SessionExercise current, SessionExercise other)
+    {
+        await Sessions.CreateSupersetAsync(Id, UserId, current.Id, other.Id);
+        supersetPanel = false;
+        selectedId = current.Id;
+    }
+
+    private async Task AddToSuperset(SessionExercise current, Exercise exercise)
+    {
+        await Sessions.AddExerciseAsync(Id, UserId, exercise.Id, current.TargetSets, current.TargetReps, supersetWithId: current.Id);
+        supersetPanel = false;
+        selectedId = current.Id;
+    }
+
+    /// <summary>Loads everyone's history for the exercise and opens the group trend modal.</summary>
+    private async Task OpenTrend(SessionExercise item)
+    {
+        var people = teammates.Count > 0 ? teammates : participants;
+        trendPeople = await Stats.GetExerciseForPeopleAsync(people, item.ExerciseId);
+        trendFor = item;
     }
 
     private async Task Go(int? id)
     {
         selectedId = id;
-        showHelp = false;
+        helpFor.Clear();
+        supersetPanel = false;
         await JS.InvokeVoidAsync("scrollTo", 0, 0);
     }
 

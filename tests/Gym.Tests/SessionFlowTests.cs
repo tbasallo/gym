@@ -214,5 +214,75 @@ public sealed class SessionFlowTests : IDisposable
         Assert.Null(await _stats.GetGroupProgressAsync(schedule.GroupId!.Value, _stranger.Id));
     }
 
+    [Fact]
+    public async Task Exercises_can_be_paired_into_a_superset_and_unlinked()
+    {
+        var (_, id) = await StartGroupSessionAsync();
+        var exercises = (await _sessions.GetAsync(id, _tony.Id))!.Exercises; // bench, incline, fly, pushdown
+        var bench = exercises[0];
+        var pushdown = exercises[3];
+
+        await _sessions.CreateSupersetAsync(id, _tony.Id, bench.Id, pushdown.Id);
+
+        var after = (await _sessions.GetAsync(id, _tony.Id))!.Exercises;
+        Assert.Equal([bench.Id, pushdown.Id, exercises[1].Id, exercises[2].Id], after.Select(e => e.Id));
+        Assert.NotNull(after[0].SupersetGroup);
+        Assert.Equal(after[0].SupersetGroup, after[1].SupersetGroup);
+        Assert.Null(after[2].SupersetGroup);
+
+        // Unlinking one of two dissolves the superset.
+        await _sessions.LeaveSupersetAsync(id, _tony.Id, pushdown.Id);
+        Assert.All((await _sessions.GetAsync(id, _tony.Id))!.Exercises, e => Assert.Null(e.SupersetGroup));
+    }
+
+    [Fact]
+    public async Task A_new_exercise_can_join_a_superset_right_after_its_partner()
+    {
+        var (_, id) = await StartGroupSessionAsync();
+        var exercises = (await _sessions.GetAsync(id, _tony.Id))!.Exercises;
+        var incline = exercises[1];
+        var curlId = (await new ExerciseService(_db, null!, null!).SearchAsync("Hammer Curl")).Single().Id;
+
+        await _sessions.AddExerciseAsync(id, _tony.Id, curlId, 3, 10, supersetWithId: incline.Id);
+        await _sessions.AddExerciseAsync(id, _tony.Id, curlId, 3, 10, supersetWithId: incline.Id);
+
+        var after = (await _sessions.GetAsync(id, _tony.Id))!.Exercises;
+        Assert.Equal(6, after.Count);
+        Assert.Equal(incline.Id, after[1].Id);
+        Assert.Equal(curlId, after[2].ExerciseId);
+        Assert.Equal(curlId, after[3].ExerciseId);
+        Assert.True(after.Skip(1).Take(3).All(e => e.SupersetGroup == after[1].SupersetGroup && e.SupersetGroup is not null));
+        Assert.Equal(incline.TargetReps, after[2].TargetReps);
+        Assert.Equal(Enumerable.Range(1, 6), after.Select(e => e.Order));
+    }
+
+    [Fact]
+    public async Task Pairing_merges_existing_supersets()
+    {
+        var (_, id) = await StartGroupSessionAsync();
+        var e = (await _sessions.GetAsync(id, _tony.Id))!.Exercises;
+        await _sessions.CreateSupersetAsync(id, _tony.Id, e[0].Id, e[1].Id);
+        await _sessions.CreateSupersetAsync(id, _tony.Id, e[2].Id, e[3].Id);
+        await _sessions.CreateSupersetAsync(id, _tony.Id, e[1].Id, e[3].Id);
+
+        var after = (await _sessions.GetAsync(id, _tony.Id))!.Exercises;
+        Assert.Single(after.Select(x => x.SupersetGroup).Distinct());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _sessions.CreateSupersetAsync(id, _tony.Id, e[0].Id, e[0].Id));
+    }
+
+    [Fact]
+    public async Task Group_trend_for_one_exercise_includes_only_people_with_history()
+    {
+        var (_, id) = await StartGroupSessionAsync();
+        var bench = (await _sessions.GetAsync(id, _tony.Id))!.Exercises[0];
+        await _sessions.LogSetAsync(id, _tony.Id, bench.Id, _tony.Id, 8, 135);
+        await _sessions.FinishAsync(id, _tony.Id);
+
+        var people = await _stats.GetExerciseForPeopleAsync([_tony, _maria], bench.ExerciseId);
+        var (person, summary) = Assert.Single(people);
+        Assert.Equal(_tony.Id, person.Id);
+        Assert.Equal(135m, summary.Stats.LastTopWeight);
+    }
+
     public void Dispose() => _db.Dispose();
 }

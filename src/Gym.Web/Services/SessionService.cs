@@ -224,18 +224,120 @@ public sealed class SessionService(IDbContextFactory<ApplicationDbContext> dbFac
             return Task.CompletedTask;
         });
 
-    public Task AddExerciseAsync(int sessionId, string actingUserId, int exerciseId, int sets, int reps) =>
+    /// <summary>
+    /// Adds an exercise to a running session. With <paramref name="supersetWithId"/> it joins that
+    /// exercise's superset (placed right after it) and copies its targets.
+    /// </summary>
+    public Task AddExerciseAsync(int sessionId, string actingUserId, int exerciseId, int sets, int reps, int? supersetWithId = null) =>
         MutateAsync(sessionId, actingUserId, (_, session) =>
         {
-            session.Exercises.Add(new SessionExercise
+            var added = new SessionExercise
             {
                 ExerciseId = exerciseId,
                 Order = session.Exercises.Count == 0 ? 1 : session.Exercises.Max(e => e.Order) + 1,
                 TargetSets = Math.Max(1, sets),
                 TargetReps = Math.Max(1, reps),
-            });
+            };
+
+            if (supersetWithId is { } partnerId)
+            {
+                var partner = session.Exercises.SingleOrDefault(e => e.Id == partnerId)
+                    ?? throw new InvalidOperationException("Exercise not found.");
+                added.TargetSets = partner.TargetSets;
+                added.TargetReps = partner.TargetReps;
+                added.RestSeconds = partner.RestSeconds;
+                partner.SupersetGroup ??= NextSupersetGroup(session);
+                added.SupersetGroup = partner.SupersetGroup;
+                PlaceAfterGroup(session, added, partner.SupersetGroup.Value);
+            }
+
+            session.Exercises.Add(added);
+            Renumber(session);
             return Task.CompletedTask;
         });
+
+    /// <summary>
+    /// Pairs two exercises already in the session into a superset (merging any supersets they are in).
+    /// The first exercise stays where it is and the partner moves right after it.
+    /// </summary>
+    public Task CreateSupersetAsync(int sessionId, string actingUserId, int sessionExerciseId, int partnerSessionExerciseId) =>
+        MutateAsync(sessionId, actingUserId, (_, session) =>
+        {
+            var first = session.Exercises.SingleOrDefault(e => e.Id == sessionExerciseId);
+            var partner = session.Exercises.SingleOrDefault(e => e.Id == partnerSessionExerciseId);
+            if (first is null || partner is null || first.Id == partner.Id)
+            {
+                throw new InvalidOperationException("Pick another exercise from this session.");
+            }
+
+            var firstBlock = Block(session, first);
+            var partnerBlock = Block(session, partner).Where(e => !firstBlock.Contains(e)).ToList();
+            var group = first.SupersetGroup ?? partner.SupersetGroup ?? NextSupersetGroup(session);
+            foreach (var member in firstBlock.Concat(partnerBlock))
+            {
+                member.SupersetGroup = group;
+            }
+
+            var others = session.Exercises.Except(firstBlock).Except(partnerBlock).OrderBy(e => e.Order).ToList();
+            var insertAt = others.Count(e => e.Order < firstBlock.Min(m => m.Order));
+            var ordered = others.Take(insertAt).Concat(firstBlock).Concat(partnerBlock).Concat(others.Skip(insertAt)).ToList();
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                ordered[i].Order = i + 1;
+            }
+
+            return Task.CompletedTask;
+        });
+
+    /// <summary>The exercise plus its superset partners, in order.</summary>
+    private static List<SessionExercise> Block(WorkoutSession session, SessionExercise exercise) =>
+        exercise.SupersetGroup is { } group
+            ? session.Exercises.Where(e => e.SupersetGroup == group).OrderBy(e => e.Order).ToList()
+            : [exercise];
+
+    /// <summary>Takes an exercise out of its superset; a superset left with one exercise is dissolved.</summary>
+    public Task LeaveSupersetAsync(int sessionId, string actingUserId, int sessionExerciseId) =>
+        MutateAsync(sessionId, actingUserId, (_, session) =>
+        {
+            var exercise = session.Exercises.SingleOrDefault(e => e.Id == sessionExerciseId);
+            if (exercise?.SupersetGroup is not { } group)
+            {
+                return Task.CompletedTask;
+            }
+
+            exercise.SupersetGroup = null;
+            var rest = session.Exercises.Where(e => e.SupersetGroup == group).ToList();
+            if (rest.Count == 1)
+            {
+                rest[0].SupersetGroup = null;
+            }
+
+            return Task.CompletedTask;
+        });
+
+    private static int NextSupersetGroup(WorkoutSession session) =>
+        (session.Exercises.Max(e => e.SupersetGroup) ?? 0) + 1;
+
+    /// <summary>Gives <paramref name="added"/> an order just after the last member of the superset.</summary>
+    private static void PlaceAfterGroup(WorkoutSession session, SessionExercise added, int group)
+    {
+        var last = session.Exercises.Where(e => e.SupersetGroup == group).Max(e => e.Order);
+        foreach (var later in session.Exercises.Where(e => e.Order > last))
+        {
+            later.Order++;
+        }
+
+        added.Order = last + 1;
+    }
+
+    private static void Renumber(WorkoutSession session)
+    {
+        var i = 1;
+        foreach (var e in session.Exercises.OrderBy(e => e.Order))
+        {
+            e.Order = i++;
+        }
+    }
 
     /// <summary>
     /// Closes the session: stops running timers, records working weights and moves the

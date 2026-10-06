@@ -1,0 +1,77 @@
+@* Everyone's trend for one exercise: a line per person plus a compact comparison table. *@
+
+@if (People.Count == 0)
+{
+    <div class="empty">No finished workouts for this exercise yet. Trends show up after the first session.</div>
+}
+else
+{
+    <div class="row-gap mb-1">
+        @foreach (var (key, label) in Metrics)
+        {
+            <button class="btn btn-sm @(metric == key ? "btn-accent" : "btn-soft")" @onclick="() => metric = key">@label</button>
+        }
+    </div>
+    <MultiTrendChart Series="Series" ToLocal="ToLocal" Unit="@(metric == "reps" ? "reps" : Unit)"
+                     Label="@($"{ExerciseName}: {Metrics.First(m => m.Key == metric).Label} by person")" />
+    <div class="muted small mb-2">Hollow dots missed some reps.</div>
+    <div class="table-wrap">
+        <table class="table-x">
+            <thead>
+                <tr><th>Person</th><th class="text-end">Last</th><th class="text-end">Best 1RM</th><th>Reps</th><th>Next time</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var (person, summary) in People)
+                {
+                    var slot = SlotFor(person.Id);
+                    var st = summary.Stats;
+                    <tr>
+                        <td class="text-nowrap">
+                            <span class="legend d-inline-flex"><span class="key s@(slot)"><span class="sw"></span>@person.Name</span></span>
+                        </td>
+                        <td class="text-end num text-nowrap">@st.LastTopWeight?.ToString("0.##") <span class="muted small d-none d-sm-inline">@(st.LastUtc is { } l ? ToLocal(l).ToString("MMM d") : "")</span></td>
+                        <td class="text-end num">@st.BestEstimated1RM?.ToString("0.#")</td>
+                        <td class="num text-nowrap" title="Average reps per set at the current weight">@RepTrendBadge.Arrow(st.Reps.Direction) @st.Reps.ToAvg?.ToString("0.#")</td>
+                        <td class="text-nowrap" title="@summary.Suggestion.Reason">
+                            @(summary.Suggestion.Kind switch { SuggestionKind.Increase => "↑ ", SuggestionKind.Deload => "↓ ", _ => "= " })@summary.Suggestion.Weight?.ToString("0.##")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private static readonly (string Key, string Label)[] Metrics =
+        [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("reps", "Avg reps")];
+
+    [Parameter, EditorRequired] public string ExerciseName { get; set; } = "";
+    [Parameter, EditorRequired] public IReadOnlyList<(ApplicationUser Person, ExerciseSummary Summary)> People { get; set; } = [];
+
+    /// <summary>Everyone in color order (group order), so colors match the rest of the app.</summary>
+    [Parameter] public IReadOnlyList<ApplicationUser> ColorOrder { get; set; } = [];
+    [Parameter] public Func<DateTime, DateTime> ToLocal { get; set; } = d => d;
+    [Parameter] public string Unit { get; set; } = "lb";
+
+    private string metric = "top";
+
+    private int SlotFor(string userId)
+    {
+        var index = ColorOrder.ToList().FindIndex(p => p.Id == userId);
+        return index >= 0 ? index % 4 : 0;
+    }
+
+    private IReadOnlyList<MultiTrendChart.ChartSeries> Series => People
+        .Where(p => ColorOrder.ToList().FindIndex(c => c.Id == p.Person.Id) is >= 0 and < 4 || ColorOrder.Count == 0)
+        .Select(p => new MultiTrendChart.ChartSeries(
+            p.Person.Name,
+            SlotFor(p.Person.Id),
+            p.Summary.Stats.Trend.Select(t => new MultiTrendChart.ChartPoint(t.DateUtc, metric switch
+            {
+                "e1rm" => t.Estimated1RM,
+                "reps" => t.AvgReps,
+                _ => t.TopWeight,
+            }, t.HitTargets)).ToList()))
+        .ToList();
+}

@@ -256,6 +256,9 @@ public class SessionExercise
     public int TargetSets { get; set; }
     public int TargetReps { get; set; }
     public int? RestSeconds { get; set; }
+
+    /// <summary>Exercises in a session sharing this number form a superset (done back to back, alternating).</summary>
+    public int? SupersetGroup { get; set; }
 }
 
 public class SetLog

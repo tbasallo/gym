@@ -183,6 +183,30 @@ public sealed class StatsService(IDbContextFactory<ApplicationDbContext> dbFacto
         return new GroupProgress(group, members, sessions, exercises, summaries);
     }
 
+    /// <summary>One exercise for several people (e.g. everyone in the group), skipping people with no history.</summary>
+    public async Task<List<(ApplicationUser Person, ExerciseSummary Summary)>> GetExerciseForPeopleAsync(IEnumerable<ApplicationUser> people, int exerciseId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var exercise = await db.Exercises.AsNoTracking().SingleAsync(e => e.Id == exerciseId);
+        var result = new List<(ApplicationUser, ExerciseSummary)>();
+        foreach (var person in people)
+        {
+            var history = (await LoadAsync(db, person.Id, [exerciseId])).GetValueOrDefault(exerciseId);
+            if (history is null || history.Count == 0)
+            {
+                continue;
+            }
+
+            var settings = await GetSettingsAsync(person.Id);
+            var working = await db.UserExerciseSettings.AsNoTracking()
+                .Where(s => s.UserId == person.Id && s.ExerciseId == exerciseId)
+                .Select(s => s.WorkingWeight).SingleOrDefaultAsync();
+            result.Add((person, Summarize(exercise, history, settings, working)));
+        }
+
+        return result;
+    }
+
     /// <summary>Last performance and suggestion for each participant and exercise in a session.</summary>
     public async Task<Dictionary<(string UserId, int ExerciseId), PlannedExercise>> GetPlanAsync(WorkoutSession session)
     {
