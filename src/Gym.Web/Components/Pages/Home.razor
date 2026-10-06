@@ -154,6 +154,10 @@
                         <li class="row-between">
                             <div>
                                 <a href="session/@s.Id" class="fw-semibold">@s.Title</a>
+                                @if (s.IsSample)
+                                {
+                                    <span class="pill ms-1">Sample</span>
+                                }
                                 <div class="muted small">@string.Join(" & ", s.Participants.Select(p => p.User.Name))</div>
                             </div>
                             <div class="text-end small">

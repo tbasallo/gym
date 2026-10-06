@@ -4,6 +4,7 @@
 @inherits AppPage
 @inject GroupService Groups
 @inject PlaceholderService Placeholders
+@inject SampleDataService SampleData
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
@@ -121,6 +122,46 @@
         </section>
     }
 
+    @foreach (var g in groups)
+    {
+        var count = sampleCounts.GetValueOrDefault(g.Id);
+        <section class="card-x stack-sm">
+            <h3 class="mb-0">Sample workouts · @g.Name</h3>
+            <p class="muted small mb-0">
+                Fill the charts with made-up sessions (4 a week) for everyone in the group, covering
+                every exercise in the group's rotation. They're marked as samples and can be removed in one tap;
+                your real workouts aren't touched.
+            </p>
+            @if (count == 0)
+            {
+                <div class="row-gap">
+                    <select class="form-select" style="width: auto" @bind="sampleWeeks" aria-label="How many weeks">
+                        <option value="4">4 weeks</option>
+                        <option value="8">8 weeks</option>
+                        <option value="12">12 weeks</option>
+                    </select>
+                    <button class="btn btn-soft" disabled="@Busy" @onclick="() => Run(() => AddSamples(g.Id))">Add sample workouts</button>
+                </div>
+            }
+            else if (confirmRemoveFor == g.Id)
+            {
+                <div class="row-gap">
+                    <span class="small">Remove all @count sample sessions?</span>
+                    <button class="btn btn-sm btn-accent" disabled="@Busy" @onclick="() => Run(() => RemoveSamples(g.Id))">Remove</button>
+                    <button class="btn btn-sm btn-soft" @onclick="() => confirmRemoveFor = null">Cancel</button>
+                </div>
+            }
+            else
+            {
+                <div class="row-gap">
+                    <span class="pill pill-accent">@count sample sessions</span>
+                    <a class="btn btn-sm btn-soft" href="reports">See the charts</a>
+                    <button class="btn btn-sm btn-link text-danger" @onclick="() => confirmRemoveFor = g.Id">Remove sample workouts</button>
+                </div>
+            }
+        </section>
+    }
+
     <section class="card-x">
         <h3>@(groups.Count == 0 ? "Create your group" : "Create another group")</h3>
         <div class="row-gap">
@@ -142,13 +183,37 @@
     private int? renamingId;
     private string nameDraft = "";
     private string newName = "";
+    private Dictionary<int, int> sampleCounts = [];
+    private int? confirmRemoveFor;
+    private int sampleWeeks = 4;
     private string? renamingPersonId;
     private string personNameDraft = "";
     private string? inviteFor;
     private string? inviteLink;
     private bool copied;
 
-    protected override async Task LoadAsync() => groups = await Groups.GetGroupsAsync(UserId);
+    protected override async Task LoadAsync()
+    {
+        groups = await Groups.GetGroupsAsync(UserId);
+        sampleCounts = [];
+        foreach (var g in groups)
+        {
+            sampleCounts[g.Id] = await SampleData.CountAsync(g.Id);
+        }
+    }
+
+    private async Task AddSamples(int groupId)
+    {
+        var created = await SampleData.GenerateAsync(groupId, UserId, sampleWeeks);
+        Notice = $"Added {created} sample sessions. Open Reports or any exercise to see the charts.";
+    }
+
+    private async Task RemoveSamples(int groupId)
+    {
+        var removed = await SampleData.RemoveAsync(groupId, UserId);
+        confirmRemoveFor = null;
+        Notice = $"Removed {removed} sample sessions.";
+    }
 
     private InviteDraft Invite(int groupId)
     {

@@ -7,7 +7,7 @@
 <div class="stack">
     <div class="row-between">
         <div>
-            <div class="small-caps">@(Session.Status == SessionStatus.Completed ? "Completed" : "Discarded")</div>
+            <div class="small-caps">@(Session.Status == SessionStatus.Completed ? "Completed" : "Discarded")@(Session.IsSample ? " · sample data" : "")</div>
             <h1 class="mb-0">@Session.Title</h1>
             <div class="muted">
                 @Zone.ToLocal(Session.StartedUtc).ToString("dddd MMM d, h:mm tt")

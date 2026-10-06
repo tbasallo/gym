@@ -56,6 +56,7 @@ builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<SessionService>();
 builder.Services.AddScoped<StatsService>();
 builder.Services.AddScoped<ExerciseService>();
+builder.Services.AddScoped<SampleDataService>();
 builder.Services.AddHttpClient<YouTubeClient>(c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddHttpClient<WgerClient>(c =>
 {

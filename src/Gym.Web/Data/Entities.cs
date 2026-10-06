@@ -197,6 +197,9 @@ public class WorkoutSession
 
     public SessionStatus Status { get; set; }
 
+    /// <summary>Generated demo history (Group page → sample data); can be removed in one go.</summary>
+    public bool IsSample { get; set; }
+
     public DateTime StartedUtc { get; set; } = DateTime.UtcNow;
     public DateTime? EndedUtc { get; set; }
 
