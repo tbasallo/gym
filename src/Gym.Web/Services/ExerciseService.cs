@@ -3,12 +3,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Gym.Web.Services;
 
+/// <summary>Outcome of saving a pasted link: an error message (or null), and whether it became a video.</summary>
+public sealed record LinkResult(string? Error, bool IsVideo);
+
 public sealed class ExerciseService(IDbContextFactory<ApplicationDbContext> dbFactory, WgerClient wger, YouTubeClient youTube)
 {
     public async Task<List<Exercise>> SearchAsync(string? term = null)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
-        var query = db.Exercises.AsNoTracking().Include(e => e.Videos).AsQueryable();
+        var query = db.Exercises.AsNoTracking().Include(e => e.Videos).Include(e => e.Links).AsSplitQuery().AsQueryable();
         if (!string.IsNullOrWhiteSpace(term))
         {
             var t = term.Trim();
@@ -22,10 +25,12 @@ public sealed class ExerciseService(IDbContextFactory<ApplicationDbContext> dbFa
     public async Task<Exercise?> GetAsync(int id)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
-        var exercise = await db.Exercises.AsNoTracking().Include(e => e.Videos).SingleOrDefaultAsync(e => e.Id == id);
+        var exercise = await db.Exercises.AsNoTracking().Include(e => e.Videos).Include(e => e.Links).AsSplitQuery()
+            .SingleOrDefaultAsync(e => e.Id == id);
         if (exercise is not null)
         {
             exercise.Videos = exercise.Videos.OrderByDescending(v => v.IsPrimary).ThenBy(v => v.AddedUtc).ToList();
+            exercise.Links = exercise.Links.OrderBy(l => l.AddedUtc).ToList();
         }
 
         return exercise;
@@ -106,6 +111,64 @@ public sealed class ExerciseService(IDbContextFactory<ApplicationDbContext> dbFa
         return true;
     }
 
+    /// <summary>
+    /// Saves any pasted link. YouTube links become embedded videos (as before); anything else is
+    /// stored as a web link. Returns an error message, or null on success.
+    /// </summary>
+    public async Task<LinkResult> AddLinkAsync(int exerciseId, string input, string? title)
+    {
+        var text = input.Trim();
+        if (text.Length == 0)
+        {
+            return new LinkResult("Paste a link first.", false);
+        }
+
+        if (IsYouTube(text))
+        {
+            return new LinkResult(await AddVideoAsync(exerciseId, text, title, null), true);
+        }
+
+        if (NormalizeWebUrl(text) is not { } url)
+        {
+            return new LinkResult("That doesn't look like a web link (it should start with https://).", false);
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        if (await db.ExerciseLinks.AnyAsync(l => l.ExerciseId == exerciseId && l.Url == url))
+        {
+            return new LinkResult("Already saved.", false);
+        }
+
+        var link = new ExerciseLink { ExerciseId = exerciseId, Url = url };
+        link.Title = Truncate(string.IsNullOrWhiteSpace(title) ? link.Site : title.Trim(), 200);
+        db.ExerciseLinks.Add(link);
+        await db.SaveChangesAsync();
+        return new LinkResult(null, false);
+    }
+
+    public async Task RemoveLinkAsync(int exerciseId, int linkId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await db.ExerciseLinks.Where(l => l.ExerciseId == exerciseId && l.Id == linkId).ExecuteDeleteAsync();
+    }
+
+    /// <summary>A YouTube page link, or a bare 11-character video id.</summary>
+    internal static bool IsYouTube(string text) =>
+        YouTubeClient.ParseVideoId(text) is not null
+        && (text.Length == 11 || text.Contains("youtube", StringComparison.OrdinalIgnoreCase) || text.Contains("youtu.be", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>An absolute http(s) URL, adding https:// when only a host/path was typed. Null if it isn't a web address.</summary>
+    internal static string? NormalizeWebUrl(string text)
+    {
+        var candidate = text.Contains("://", StringComparison.Ordinal) ? text : "https://" + text;
+        return Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
+               && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+               && uri.Host.Contains('.')
+               && candidate.Length <= 2000
+            ? uri.AbsoluteUri
+            : null;
+    }
+
     public async Task<string?> AddVideoAsync(int exerciseId, string urlOrId, string? title, string? channel)
     {
         var videoId = YouTubeClient.ParseVideoId(urlOrId);
@@ -138,10 +201,17 @@ public sealed class ExerciseService(IDbContextFactory<ApplicationDbContext> dbFa
         return null;
     }
 
-    /// <summary>Copies the saved videos of one exercise onto another (skipping any it already has).</summary>
+    /// <summary>Copies the saved videos and links of one exercise onto another (skipping any it already has).</summary>
     public async Task CopyVideosAsync(int fromExerciseId, int toExerciseId)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
+        var existingLinks = await db.ExerciseLinks.Where(l => l.ExerciseId == toExerciseId).Select(l => l.Url).ToListAsync();
+        var sourceLinks = await db.ExerciseLinks.AsNoTracking().Where(l => l.ExerciseId == fromExerciseId).OrderBy(l => l.AddedUtc).ToListAsync();
+        foreach (var link in sourceLinks.Where(l => !existingLinks.Contains(l.Url)))
+        {
+            db.ExerciseLinks.Add(new ExerciseLink { ExerciseId = toExerciseId, Url = link.Url, Title = link.Title });
+        }
+
         var existing = await db.ExerciseVideos.Where(v => v.ExerciseId == toExerciseId).Select(v => v.YouTubeId).ToListAsync();
         var source = await db.ExerciseVideos.AsNoTracking().Where(v => v.ExerciseId == fromExerciseId)
             .OrderByDescending(v => v.IsPrimary).ThenBy(v => v.AddedUtc).ToListAsync();

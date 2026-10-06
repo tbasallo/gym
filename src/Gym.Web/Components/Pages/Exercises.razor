@@ -24,10 +24,16 @@
                     <a class="card-x text-decoration-none" style="color: inherit; padding: 12px 14px" href="exercises/@e.Id">
                         <div class="row-between">
                             <strong>@e.Name</strong>
-                            @if (e.Videos.Count > 0)
-                            {
-                                <span class="pill pill-accent" title="Saved videos">▶ @e.Videos.Count</span>
-                            }
+                            <span class="row-gap" style="gap: 4px">
+                                @if (e.Videos.Count > 0)
+                                {
+                                    <span class="pill pill-accent" title="Saved videos">▶ @e.Videos.Count</span>
+                                }
+                                @if (e.Links.Count > 0)
+                                {
+                                    <span class="pill" title="Saved links">↗ @e.Links.Count</span>
+                                }
+                            </span>
                         </div>
                         <div class="muted small">@e.Muscles</div>
                     </a>

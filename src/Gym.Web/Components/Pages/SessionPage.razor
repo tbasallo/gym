@@ -104,7 +104,7 @@ else
                     </div>
                 </div>
                 <div class="row-gap">
-                    <button class="btn btn-soft btn-sm" @onclick="() => showHelp = !showHelp">@(showHelp ? "Hide help" : video is null ? "How to" : "▶ Video")</button>
+                    <button class="btn btn-soft btn-sm" @onclick="() => showHelp = !showHelp">@(showHelp ? "Hide help" : video is null ? "How to" : "▶ Video")@(!showHelp && ex.Links.Count > 0 ? $" · {ex.Links.Count} link{(ex.Links.Count == 1 ? "" : "s")}" : "")</button>
                     <a class="btn btn-soft btn-sm" href="exercises/@ex.Id" target="_blank">Details</a>
                 </div>
             </div>
@@ -127,6 +127,15 @@ else
                     @if (!string.IsNullOrEmpty(ex.Description))
                     {
                         <p class="mb-0" style="white-space: pre-line">@ex.Description</p>
+                    }
+                    @if (ex.Links.Count > 0)
+                    {
+                        <div class="row-gap">
+                            @foreach (var link in ex.Links.OrderBy(l => l.AddedUtc))
+                            {
+                                <a class="btn btn-soft btn-sm" href="@link.Url" target="_blank" rel="noopener noreferrer" title="@link.Site">@link.Title ↗</a>
+                            }
+                        </div>
                     }
                 </div>
             }

@@ -34,6 +34,7 @@ public sealed class SessionService(IDbContextFactory<ApplicationDbContext> dbFac
         var session = await db.VisibleSessions(userId).AsNoTracking()
             .Include(s => s.Participants).ThenInclude(p => p.User)
             .Include(s => s.Exercises).ThenInclude(e => e.Exercise).ThenInclude(e => e.Videos)
+            .Include(s => s.Exercises).ThenInclude(e => e.Exercise).ThenInclude(e => e.Links)
             .Include(s => s.Sets)
             .AsSplitQuery()
             .SingleOrDefaultAsync(s => s.Id == sessionId);

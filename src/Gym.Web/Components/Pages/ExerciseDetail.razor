@@ -146,11 +146,11 @@ else
                         <input id="ex-inc" type="number" step="any" class="form-control" placeholder="use my settings" @bind="form.WeightIncrement" />
                     </div>
                 </div>
-                @if (IsNew && copySource is { Videos.Count: > 0 })
+                @if (IsNew && copySource is not null && copySource.Videos.Count + copySource.Links.Count > 0)
                 {
                     <label class="form-check mt-3">
                         <input class="form-check-input" type="checkbox" @bind="copyVideos" />
-                        <span class="form-check-label">Also copy the @copySource.Videos.Count saved video@(copySource.Videos.Count == 1 ? "" : "s") from @copySource.Name</span>
+                        <span class="form-check-label">Also copy the saved videos and links from @copySource.Name (@(copySource.Videos.Count + copySource.Links.Count))</span>
                     </label>
                 }
                 <div class="row-gap mt-3">
@@ -206,7 +206,7 @@ else
 
                 <div class="col-lg-5">
                     <section class="card-x stack-sm">
-                        <h3 class="mb-0">Videos</h3>
+                        <h3 class="mb-0">Videos &amp; links</h3>
                         @if (exercise.Videos.Count > 0)
                         {
                             <ul class="list-x">
@@ -236,6 +236,22 @@ else
                             </ul>
                         }
 
+                        @if (exercise.Links.Count > 0)
+                        {
+                            <ul class="list-x">
+                                @foreach (var link in exercise.Links)
+                                {
+                                    <li class="row-between">
+                                        <div style="min-width: 0">
+                                            <a class="fw-semibold small" href="@link.Url" target="_blank" rel="noopener noreferrer">@link.Title ↗</a>
+                                            <div class="muted small text-truncate">@link.Site</div>
+                                        </div>
+                                        <button class="btn btn-link btn-sm p-0 text-danger" @onclick="() => Run(() => ExerciseLibrary.RemoveLinkAsync(exercise.Id, link.Id))">Remove</button>
+                                    </li>
+                                }
+                            </ul>
+                        }
+
                         <div>
                             <a class="btn btn-soft btn-sm" href="@WebSearch.YouTube(exercise.Name)" target="_blank" rel="noopener">Search YouTube ↗</a>
                             <a class="btn btn-soft btn-sm" href="@WebSearch.Bing(exercise.Name)" target="_blank" rel="noopener">Search Bing ↗</a>
@@ -246,10 +262,17 @@ else
                         </div>
 
                         <div>
-                            <label class="form-label" for="vid">Paste a YouTube link to save it</label>
-                            <div class="row-gap">
-                                <input id="vid" class="form-control" style="flex: 1; min-width: 180px" placeholder="https://youtu.be/..." @bind="videoUrl" @bind:event="oninput" />
-                                <button class="btn btn-accent" disabled="@(Busy || string.IsNullOrWhiteSpace(videoUrl))" @onclick="() => Run(SaveVideoUrl)">Save</button>
+                            <label class="form-label" for="vid">Paste any link to save it</label>
+                            <div class="stack-sm">
+                                <input id="vid" class="form-control" placeholder="https://youtu.be/... or any web page" @bind="videoUrl" @bind:event="oninput" />
+                                @if (!string.IsNullOrWhiteSpace(videoUrl) && !ExerciseService.IsYouTube(videoUrl.Trim()))
+                                {
+                                    <input class="form-control" placeholder="Title (optional, e.g. Form guide)" maxlength="200" @bind="linkTitle" @bind:event="oninput" aria-label="Link title" />
+                                }
+                                <div class="row-gap">
+                                    <button class="btn btn-accent" disabled="@(Busy || string.IsNullOrWhiteSpace(videoUrl))" @onclick="() => Run(SaveVideoUrl)">Save</button>
+                                    <span class="muted small">YouTube links play here; other sites open in a new tab.</span>
+                                </div>
                             </div>
                         </div>
 
@@ -482,6 +505,7 @@ else
     private IReadOnlyList<VideoResult>? videoResults;
     private string? previewId;
     private string videoUrl = "";
+    private string linkTitle = "";
     private List<ApplicationUser> teammates = [];
     private string statsUserId = "";
     private List<WorkoutGroup> groups = [];
@@ -670,7 +694,7 @@ else
         editing = false;
         if (IsNew)
         {
-            if (copySource is not null && copyVideos && copySource.Videos.Count > 0)
+            if (copySource is not null && copyVideos && copySource.Videos.Count + copySource.Links.Count > 0)
             {
                 await ExerciseLibrary.CopyVideosAsync(copySource.Id, form.Id);
             }
@@ -717,11 +741,14 @@ else
 
     private async Task SaveVideoUrl()
     {
-        if (await ExerciseLibrary.AddVideoAsync(Id, videoUrl, null, null) is { } error)
+        var result = await ExerciseLibrary.AddLinkAsync(Id, videoUrl, linkTitle);
+        if (result.Error is { } error)
         {
             throw new InvalidOperationException(error);
         }
 
+        Notice = result.IsVideo ? "Video saved." : "Link saved.";
         videoUrl = "";
+        linkTitle = "";
     }
 }

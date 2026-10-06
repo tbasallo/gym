@@ -9,6 +9,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<Exercise> Exercises => Set<Exercise>();
     public DbSet<ExerciseVideo> ExerciseVideos => Set<ExerciseVideo>();
+    public DbSet<ExerciseLink> ExerciseLinks => Set<ExerciseLink>();
     public DbSet<Schedule> Schedules => Set<Schedule>();
     public DbSet<ScheduleDay> ScheduleDays => Set<ScheduleDay>();
     public DbSet<ScheduleDayExercise> ScheduleDayExercises => Set<ScheduleDayExercise>();
@@ -40,6 +41,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         {
             e.HasOne(v => v.Exercise).WithMany(x => x.Videos).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(v => new { v.ExerciseId, v.YouTubeId }).IsUnique();
+        });
+
+        builder.Entity<ExerciseLink>(e =>
+        {
+            e.HasOne(l => l.Exercise).WithMany(x => x.Links).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(l => l.ExerciseId);
         });
 
         builder.Entity<Schedule>(e =>

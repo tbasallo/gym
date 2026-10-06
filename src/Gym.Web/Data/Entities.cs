@@ -71,6 +71,30 @@ public class Exercise
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
     public List<ExerciseVideo> Videos { get; set; } = [];
+
+    public List<ExerciseLink> Links { get; set; } = [];
+}
+
+/// <summary>A saved web page about an exercise (anything that isn't a YouTube video).</summary>
+public class ExerciseLink
+{
+    public int Id { get; set; }
+
+    public int ExerciseId { get; set; }
+    public Exercise Exercise { get; set; } = null!;
+
+    [MaxLength(2000)]
+    public string Url { get; set; } = "";
+
+    [MaxLength(200)]
+    public string Title { get; set; } = "";
+
+    public DateTime AddedUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>The site name shown next to the title, e.g. "exrx.net".</summary>
+    public string Site => Uri.TryCreate(Url, UriKind.Absolute, out var uri)
+        ? uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? uri.Host[4..] : uri.Host
+        : "";
 }
 
 public class ExerciseVideo

@@ -12,7 +12,7 @@ A small web app for tracking family gym sessions. It is built for two or more pe
 - **Reps.** Each exercise page has a **Reps per set** bar chart: one cluster per session with a bar per set, a dashed target line, hollow bars for sets that fell short, faded bars for lighter back-off sets, and the top weight under each session. A badge says whether reps at the current weight are climbing, dropping or steady. Charts and Reports also offer **Avg reps** per working set, including a line per person for the group.
 - **Sample data.** The Group page can add 4, 8 or 12 weeks of made-up workouts (4 sessions a week) for everyone in the group and every exercise in its rotation, to try out the charts. Sample sessions are labeled, and one tap removes them all without touching real workouts.
 - **"Time to move up?"** A rules engine suggests the next weight per person and exercise. You can tune it in Settings.
-- **Exercise help.** Each exercise has a description, muscles and an image. These can be pulled from the free [wger.de](https://wger.de) exercise database. You can embed YouTube videos, and there is always a YouTube search link with the right keywords. With an API key, you can search and save videos inside the app.
+- **Exercise help.** Each exercise has a description, muscles and an image. These can be pulled from the free [wger.de](https://wger.de) exercise database. You can embed YouTube videos, and there is always a YouTube search link with the right keywords. With an API key, you can search and save videos inside the app. Any other web page can be saved as a link with an optional title; links show on the exercise page and in the workout screen's help panel.
 
 ## Stack
 
