@@ -27,7 +27,10 @@ else
                 <h1 class="mb-0">@(IsNew ? "New exercise" : exercise.Name)</h1>
                 @if (!IsNew && !editing)
                 {
-                    <button class="btn btn-soft btn-sm" @onclick="StartEdit">Edit</button>
+                    <div class="row-gap">
+                        <a class="btn btn-soft btn-sm" href="exercises/new?copy=@exercise.Id" title="Start a new exercise from this one">Copy</a>
+                        <button class="btn btn-soft btn-sm" @onclick="StartEdit">Edit</button>
+                    </div>
                 }
             </div>
             @if (!IsNew && !editing)
@@ -131,6 +134,13 @@ else
                         <input id="ex-inc" type="number" step="any" class="form-control" placeholder="use my settings" @bind="form.WeightIncrement" />
                     </div>
                 </div>
+                @if (IsNew && copySource is { Videos.Count: > 0 })
+                {
+                    <label class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" @bind="copyVideos" />
+                        <span class="form-check-label">Also copy the @copySource.Videos.Count saved video@(copySource.Videos.Count == 1 ? "" : "s") from @copySource.Name</span>
+                    </label>
+                }
                 <div class="row-gap mt-3">
                     <button class="btn btn-accent" disabled="@Busy" @onclick="() => Run(Save, reload: false)">Save</button>
                     <button class="btn btn-soft" @onclick="CancelEdit">Cancel</button>
@@ -435,6 +445,15 @@ else
     [SupplyParameterFromQuery(Name = "user")] public string? QueryUser { get; set; }
     [SupplyParameterFromQuery(Name = "group")] public int? QueryGroup { get; set; }
 
+    /// <summary>New exercise: start from a copy of this exercise.</summary>
+    [SupplyParameterFromQuery(Name = "copy")] public int? CopyFrom { get; set; }
+
+    /// <summary>New exercise: the name that was searched for and not found.</summary>
+    [SupplyParameterFromQuery(Name = "name")] public string? QueryName { get; set; }
+
+    private Exercise? copySource;
+    private bool copyVideos = true;
+
     private static readonly (string Key, string Label)[] ChartModes =
         [("top", "Top weight"), ("e1rm", "Est. 1RM"), ("reps", "Avg reps")];
 
@@ -492,6 +511,20 @@ else
             if (!editing)
             {
                 form = new Exercise();
+                if (CopyFrom is { } sourceId && await ExerciseLibrary.GetAsync(sourceId) is { } source)
+                {
+                    copySource = source;
+                    form = CloneFields(source, id: 0);
+                    form.Name = await ExerciseLibrary.CopyNameAsync(source.Name);
+                    lookupTerm = source.Name;
+                    Notice = $"Copied from {source.Name}. Change what's different and save.";
+                }
+                else if (!string.IsNullOrWhiteSpace(QueryName))
+                {
+                    form.Name = QueryName.Trim();
+                    lookupTerm = form.Name;
+                }
+
                 editing = true;
             }
 
@@ -560,22 +593,24 @@ else
                     .Select(t => new MultiTrendChart.ChartPoint(t.DateUtc, ChartValue(t), t.HitTargets)).ToList()))
             .ToList();
 
+    private static Exercise CloneFields(Exercise source, int id) => new()
+    {
+        Id = id,
+        Name = source.Name,
+        BodyRegion = source.BodyRegion,
+        Category = source.Category,
+        Muscles = source.Muscles,
+        Equipment = source.Equipment,
+        Description = source.Description,
+        ImageUrl = source.ImageUrl,
+        ExternalSource = source.ExternalSource,
+        ExternalId = source.ExternalId,
+        WeightIncrement = source.WeightIncrement,
+    };
+
     private void StartEdit()
     {
-        form = new Exercise
-        {
-            Id = exercise!.Id,
-            Name = exercise.Name,
-            BodyRegion = exercise.BodyRegion,
-            Category = exercise.Category,
-            Muscles = exercise.Muscles,
-            Equipment = exercise.Equipment,
-            Description = exercise.Description,
-            ImageUrl = exercise.ImageUrl,
-            ExternalSource = exercise.ExternalSource,
-            ExternalId = exercise.ExternalId,
-            WeightIncrement = exercise.WeightIncrement,
-        };
+        form = CloneFields(exercise!, exercise!.Id);
         lookupTerm = exercise.Name;
         lookupResults = null;
         editing = true;
@@ -619,6 +654,11 @@ else
         editing = false;
         if (IsNew)
         {
+            if (copySource is not null && copyVideos && copySource.Videos.Count > 0)
+            {
+                await ExerciseLibrary.CopyVideosAsync(copySource.Id, form.Id);
+            }
+
             Nav.NavigateTo($"exercises/{form.Id}");
             return;
         }

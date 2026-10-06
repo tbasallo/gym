@@ -138,6 +138,43 @@ public sealed class ExerciseService(IDbContextFactory<ApplicationDbContext> dbFa
         return null;
     }
 
+    /// <summary>Copies the saved videos of one exercise onto another (skipping any it already has).</summary>
+    public async Task CopyVideosAsync(int fromExerciseId, int toExerciseId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var existing = await db.ExerciseVideos.Where(v => v.ExerciseId == toExerciseId).Select(v => v.YouTubeId).ToListAsync();
+        var source = await db.ExerciseVideos.AsNoTracking().Where(v => v.ExerciseId == fromExerciseId)
+            .OrderByDescending(v => v.IsPrimary).ThenBy(v => v.AddedUtc).ToListAsync();
+        var first = existing.Count == 0;
+        foreach (var video in source.Where(v => !existing.Contains(v.YouTubeId)))
+        {
+            db.ExerciseVideos.Add(new ExerciseVideo
+            {
+                ExerciseId = toExerciseId,
+                YouTubeId = video.YouTubeId,
+                Title = video.Title,
+                Channel = video.Channel,
+                IsPrimary = first && video.IsPrimary,
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>A name like "Squat (copy)" that isn't taken yet.</summary>
+    public async Task<string> CopyNameAsync(string name)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var names = await db.Exercises.Where(e => e.Name.StartsWith(name)).Select(e => e.Name).ToListAsync();
+        var candidate = $"{name} (copy)";
+        for (var n = 2; names.Contains(candidate, StringComparer.OrdinalIgnoreCase); n++)
+        {
+            candidate = $"{name} (copy {n})";
+        }
+
+        return candidate.Length > 120 ? candidate[..120] : candidate;
+    }
+
     public async Task SetPrimaryVideoAsync(int exerciseId, int videoId)
     {
         await using var db = await dbFactory.CreateDbContextAsync();

@@ -17,7 +17,7 @@
         </ul>
         @if (!Matches.Any())
         {
-            <div class="muted small">No match. <a href="exercises/new">Create "@term"</a></div>
+            <div class="muted small">No match. <a href="@CreateLink" target="_blank" rel="noopener">Create "@term.Trim()"</a></div>
         }
     </div>
 </div>
@@ -28,6 +28,8 @@
     [Parameter] public string ActionLabel { get; set; } = "Add";
 
     private string term = "";
+
+    private string CreateLink => $"exercises/new?name={Uri.EscapeDataString(term.Trim())}";
 
     private IEnumerable<Exercise> Matches => string.IsNullOrWhiteSpace(term)
         ? Exercises

@@ -9,7 +9,7 @@
 <div class="stack">
     <div class="row-between">
         <h1 class="mb-0">Exercises</h1>
-        <a class="btn btn-accent" href="exercises/new">＋ New exercise</a>
+        <a class="btn btn-accent" href="@NewLink">＋ New exercise</a>
     </div>
 
     <input class="form-control" placeholder="Search by name, muscle or category" @bind="term" @bind:event="oninput" />
@@ -38,13 +38,15 @@
 
     @if (!Filtered.Any())
     {
-        <div class="empty">No exercises match. <a href="exercises/new">Create one</a></div>
+        <div class="empty">No exercises match. <a href="@NewLink">Create "@term.Trim()"</a></div>
     }
 </div>
 
 @code {
     private List<Exercise> all = [];
     private string term = "";
+
+    private string NewLink => string.IsNullOrWhiteSpace(term) ? "exercises/new" : $"exercises/new?name={Uri.EscapeDataString(term.Trim())}";
 
     private IEnumerable<Exercise> Filtered => string.IsNullOrWhiteSpace(term)
         ? all
